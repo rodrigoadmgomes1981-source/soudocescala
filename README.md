@@ -1,0 +1,53 @@
+# Sou DOC · Escalas (protótipo)
+
+Protótipo navegável do fluxo de escalas médicas — React + Vite, pronto para a Vercel.
+Os dados ficam no `localStorage` do navegador (não há backend ainda). O botão
+**Restaurar dados de demonstração** na barra lateral volta ao estado inicial.
+
+## Fluxo coberto
+
+1. **Contratos (Módulo CR)** — contrato, unidades, setores e tabela de valores
+   a faturar/pagar **por hora** em 4 tipos de período (diurno/noturno × dia útil/fim de semana-feriado), com margem.
+2. **Criar escala** (assistente em 4 passos)
+   - Local: CR → Unidade → Setor
+   - Regras: nome, presença (facial e/ou geolocalização, raio, tolerância), base de
+     faturamento e de pagamento (planejado / realizado / apurado), passagem e troca
+     (automática ou com aprovação, antecedência mínima), anúncio automático de vaga vazia
+   - Dias e períodos: dias da semana, início, duração, nº de médicos; valores puxados do CR
+   - Vigência: início e fim (opcional)
+3. **Grade da escala** — semana a semana; clicar numa vaga para inserir médico e
+   escolher **fixo** (repete até o fim da vigência) ou **avulso** (só na data).
+   Checa conflito de horário entre todas as escalas e alerta acima de 24h seguidas.
+4. **Publicar** — define até quando a escala fica publicada; alterações depois da
+   publicação geram aviso e nova versão ao republicar.
+5. **Financeiro planejado** — fatura, paga, margem e ocupação por período.
+
+## Rodar local
+
+```bash
+npm install
+npm run dev
+```
+
+## Deploy na Vercel
+
+- Via GitHub: suba a pasta num repositório e importe na Vercel (detecta Vite automaticamente).
+- Via CLI: `npx vercel` dentro da pasta (`vercel.json` já configurado).
+
+## Estrutura
+
+```
+src/
+  lib/utils.js        datas, feriados, tipos de valor, formatação
+  lib/escala.js       regras: slots, fixo/avulso, conflitos, resumo financeiro
+  lib/seed.js         dados fictícios de demonstração
+  lib/store.jsx       estado global + localStorage
+  components/         UI e formulários de escala
+  pages/              Contratos, Escalas, NovaEscala, EscalaDetalhe, Medicos
+```
+
+## Próximos passos sugeridos
+
+Backend (Vercel + Neon Postgres), perfis de acesso, app do médico (check-in, passagem/troca),
+integração do anúncio de vaga com o Plantão Match e fechamento da competência
+(realizado/apurado).

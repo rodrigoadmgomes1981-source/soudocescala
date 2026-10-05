@@ -1,0 +1,177 @@
+// Dados fictícios para demonstração
+const v = (du, nu, df, nf) => ({
+  diu_util: du,
+  not_util: nu,
+  diu_fds: df,
+  not_fds: nf,
+})
+
+export const seed = () => ({
+  versao: 1,
+  contratos: [
+    {
+      id: 'cr1',
+      codigo: 'CR 1042',
+      cliente: 'Unimed Litoral (fictício)',
+      objeto: 'Gestão do Pronto Atendimento e cobertura de Neurologia',
+      vigenciaInicio: '2026-09-01',
+      vigenciaFim: '2027-08-31',
+      unidades: [
+        {
+          id: 'u1',
+          nome: 'Pronto Atendimento Central',
+          cidade: 'Itajaí/SC',
+          setores: [
+            {
+              id: 's1',
+              nome: 'Clínica Médica',
+              valores: v(
+                { fat: 165, pag: 125 },
+                { fat: 185, pag: 140 },
+                { fat: 195, pag: 150 },
+                { fat: 210, pag: 160 },
+              ),
+            },
+            {
+              id: 's2',
+              nome: 'Pediatria',
+              valores: v(
+                { fat: 180, pag: 135 },
+                { fat: 200, pag: 150 },
+                { fat: 210, pag: 160 },
+                { fat: 230, pag: 175 },
+              ),
+            },
+          ],
+        },
+        {
+          id: 'u2',
+          nome: 'Hospital Unimed',
+          cidade: 'Balneário Camboriú/SC',
+          setores: [
+            {
+              id: 's3',
+              nome: 'Neurologia (sobreaviso presencial)',
+              valores: v(
+                { fat: 260, pag: 200 },
+                { fat: 290, pag: 220 },
+                { fat: 300, pag: 230 },
+                { fat: 320, pag: 245 },
+              ),
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'cr2',
+      codigo: 'CR 1057',
+      cliente: 'Hospital São Lucas (fictício)',
+      objeto: 'Cobertura de Emergência adulto',
+      vigenciaInicio: '2026-10-01',
+      vigenciaFim: '2027-09-30',
+      unidades: [
+        {
+          id: 'u3',
+          nome: 'Emergência Adulto',
+          cidade: 'Joinville/SC',
+          setores: [
+            {
+              id: 's4',
+              nome: 'Sala Vermelha',
+              valores: v(
+                { fat: 190, pag: 145 },
+                { fat: 210, pag: 160 },
+                { fat: 220, pag: 170 },
+                { fat: 240, pag: 185 },
+              ),
+            },
+          ],
+        },
+      ],
+    },
+  ],
+  medicos: [
+    { id: 'm1', nome: 'Ana Beatriz Moura', crm: 'CRM/SC 21345', especialidade: 'Clínica Médica' },
+    { id: 'm2', nome: 'Bruno Carvalho', crm: 'CRM/SC 19876', especialidade: 'Clínica Médica' },
+    { id: 'm3', nome: 'Camila Teixeira', crm: 'CRM/SC 24510', especialidade: 'Medicina de Emergência' },
+    { id: 'm4', nome: 'Diego Fontana', crm: 'CRM/SC 18220', especialidade: 'Clínica Médica' },
+    { id: 'm5', nome: 'Elisa Ramos', crm: 'CRM/SC 27801', especialidade: 'Pediatria' },
+    { id: 'm6', nome: 'Felipe Andrade', crm: 'CRM/SC 22904', especialidade: 'Pediatria' },
+    { id: 'm7', nome: 'Gabriela Nunes', crm: 'CRM/SC 16533', especialidade: 'Neurologia' },
+    { id: 'm8', nome: 'Henrique Vidal', crm: 'CRM/SC 20117', especialidade: 'Neurologia' },
+    { id: 'm9', nome: 'Isabela Prado', crm: 'CRM/SC 25678', especialidade: 'Medicina de Emergência' },
+    { id: 'm10', nome: 'João Pedro Lins', crm: 'CRM/SC 23419', especialidade: 'Clínica Médica' },
+  ],
+  escalas: [
+    {
+      id: 'e1',
+      crId: 'cr1',
+      unidadeId: 'u1',
+      setorId: 's1',
+      nome: 'PA Central · Clínica Médica',
+      presenca: ['facial', 'geo'],
+      raioGeo: 200,
+      toleranciaMin: 15,
+      faturamento: 'apurado',
+      pagamento: 'realizado',
+      passagem: 'aprovacao',
+      troca: 'automatica',
+      antecedenciaHoras: 24,
+      anunciarVaga: true,
+      anuncioHorasAntes: 72,
+      vigenciaInicio: '2026-10-01',
+      vigenciaFim: '',
+      publicadaAte: '2026-10-31',
+      status: 'publicada',
+      versao: 2,
+      historico: [
+        { em: '2026-09-25T10:12:00', acao: 'Escala criada' },
+        { em: '2026-09-28T16:40:00', acao: 'Publicada até 31/10/2026 (v1)' },
+        { em: '2026-10-02T09:05:00', acao: 'Alteração após publicação — nova versão v2' },
+      ],
+      turnos: [
+        { id: 't1', inicio: '07:00', duracao: 12, vagas: 2, dias: [0, 1, 2, 3, 4, 5, 6] },
+        { id: 't2', inicio: '19:00', duracao: 12, vagas: 2, dias: [0, 1, 2, 3, 4, 5, 6] },
+      ],
+      alocacoes: [
+        { id: 'a1', turnoId: 't1', vagaIdx: 0, medicoId: 'm1', fixo: true, desde: '2026-10-01' },
+        { id: 'a2', turnoId: 't1', vagaIdx: 1, medicoId: 'm2', fixo: true, desde: '2026-10-01' },
+        { id: 'a3', turnoId: 't2', vagaIdx: 0, medicoId: 'm4', fixo: true, desde: '2026-10-01' },
+        { id: 'a4', turnoId: 't2', vagaIdx: 1, medicoId: 'm10', fixo: false, data: '2026-10-05' },
+        { id: 'a5', turnoId: 't2', vagaIdx: 1, medicoId: 'm3', fixo: false, data: '2026-10-06' },
+        { id: 'a6', turnoId: 't1', vagaIdx: 1, medicoId: null, fixo: false, data: '2026-10-07' },
+      ],
+    },
+    {
+      id: 'e2',
+      crId: 'cr1',
+      unidadeId: 'u2',
+      setorId: 's3',
+      nome: 'Neuro · Hospital Unimed',
+      presenca: ['geo'],
+      raioGeo: 300,
+      toleranciaMin: 10,
+      faturamento: 'planejado',
+      pagamento: 'apurado',
+      passagem: 'aprovacao',
+      troca: 'aprovacao',
+      antecedenciaHoras: 48,
+      anunciarVaga: false,
+      anuncioHorasAntes: 48,
+      vigenciaInicio: '2026-10-05',
+      vigenciaFim: '2027-08-31',
+      publicadaAte: '',
+      status: 'rascunho',
+      versao: 1,
+      historico: [{ em: '2026-10-03T14:20:00', acao: 'Escala criada' }],
+      turnos: [
+        { id: 't3', inicio: '07:00', duracao: 24, vagas: 1, dias: [1, 3, 5] },
+        { id: 't4', inicio: '07:00', duracao: 24, vagas: 1, dias: [0, 2, 4, 6] },
+      ],
+      alocacoes: [
+        { id: 'a7', turnoId: 't3', vagaIdx: 0, medicoId: 'm7', fixo: true, desde: '2026-10-05' },
+      ],
+    },
+  ],
+})
