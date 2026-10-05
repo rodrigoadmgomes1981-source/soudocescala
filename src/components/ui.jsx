@@ -113,3 +113,23 @@ export function MoneyInput({ value, onChange }) {
     </div>
   )
 }
+
+/** Seleção múltipla de escalas (chips). value = [] significa todas. */
+export function EscalaFiltro({ escalas, value, onChange, label = 'Escalas' }) {
+  const toggle = (id) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id])
+  return (
+    <div className="field">
+      <span className="field-label">{label}</span>
+      <div className="chips-filter" role="group" aria-label={label}>
+        <button type="button" className={value.length === 0 ? 'on' : ''} onClick={() => onChange([])}>
+          Todas ({escalas.length})
+        </button>
+        {escalas.map((e) => (
+          <button type="button" key={e.id} aria-pressed={value.includes(e.id)} className={value.includes(e.id) ? 'on' : ''} onClick={() => toggle(e.id)}>
+            {e.nome}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}

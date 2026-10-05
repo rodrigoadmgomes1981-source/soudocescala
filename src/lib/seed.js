@@ -6,8 +6,8 @@ const v = (du, nu, df, nf) => ({
   not_fds: nf,
 })
 
-export const seed = () => ({
-  versao: 2,
+const base = () => ({
+  versao: 3,
   contratos: [
     {
       id: 'cr1',
@@ -20,7 +20,10 @@ export const seed = () => ({
         {
           id: 'u1',
           nome: 'Pronto Atendimento Central',
-          cidade: 'Itajaí/SC',
+          uf: 'SC',
+          cidade: 'Itajaí',
+          endereco: { cep: '88301-000', logradouro: 'Rua das Palmeiras', numero: '1200', complemento: 'Bloco A', bairro: 'Centro' },
+          geo: { lat: -26.9078, lng: -48.6619 },
           setores: [
             {
               id: 's1',
@@ -47,7 +50,10 @@ export const seed = () => ({
         {
           id: 'u2',
           nome: 'Hospital Unimed',
-          cidade: 'Balneário Camboriú/SC',
+          uf: 'SC',
+          cidade: 'Balneário Camboriú',
+          endereco: { cep: '88330-000', logradouro: 'Avenida das Nações', numero: '2500', complemento: '', bairro: 'Centro' },
+          geo: { lat: -26.9906, lng: -48.6348 },
           setores: [
             {
               id: 's3',
@@ -74,7 +80,10 @@ export const seed = () => ({
         {
           id: 'u3',
           nome: 'Emergência Adulto',
-          cidade: 'Joinville/SC',
+          uf: 'SC',
+          cidade: 'Joinville',
+          endereco: { cep: '89201-000', logradouro: 'Rua dos Imigrantes', numero: '800', complemento: '', bairro: 'América' },
+          geo: { lat: -26.3045, lng: -48.8487 },
           setores: [
             {
               id: 's4',
@@ -120,9 +129,10 @@ export const seed = () => ({
       antecedenciaHoras: 24,
       anunciarVaga: true,
       anuncioHorasAntes: 72,
-      vigenciaInicio: '2026-10-01',
+      vigenciaInicio: '2026-09-01',
       vigenciaFim: '',
       publicadaAte: '2026-10-31',
+      travada: false,
       status: 'publicada',
       versao: 2,
       pagAntecipado: { ativo: true, prazoDias: 5, taxa: 2.5 },
@@ -140,9 +150,10 @@ export const seed = () => ({
         { id: 't2', inicio: '19:00', duracao: 12, vagas: 2, dias: [0, 1, 2, 3, 4, 5, 6] },
       ],
       alocacoes: [
-        { id: 'a1', turnoId: 't1', vagaIdx: 0, medicoId: 'm1', fixo: true, desde: '2026-10-01' },
-        { id: 'a2', turnoId: 't1', vagaIdx: 1, medicoId: 'm2', fixo: true, desde: '2026-10-01' },
-        { id: 'a3', turnoId: 't2', vagaIdx: 0, medicoId: 'm4', fixo: true, desde: '2026-10-01' },
+        { id: 'a1', turnoId: 't1', vagaIdx: 0, medicoId: 'm1', fixo: true, desde: '2026-09-01' },
+        { id: 'a2', turnoId: 't1', vagaIdx: 1, medicoId: 'm2', fixo: true, desde: '2026-09-01' },
+        { id: 'a3', turnoId: 't2', vagaIdx: 0, medicoId: 'm4', fixo: true, desde: '2026-09-01' },
+        { id: 'a3b', turnoId: 't2', vagaIdx: 1, medicoId: 'm10', fixo: true, desde: '2026-09-01', ate: '2026-10-03' },
         { id: 'a4', turnoId: 't2', vagaIdx: 1, medicoId: 'm10', fixo: false, data: '2026-10-05' },
         { id: 'a5', turnoId: 't2', vagaIdx: 1, medicoId: 'm3', fixo: false, data: '2026-10-06', diferenciado: true },
         { id: 'a6', turnoId: 't1', vagaIdx: 1, medicoId: null, fixo: false, data: '2026-10-07' },
@@ -167,6 +178,7 @@ export const seed = () => ({
       vigenciaInicio: '2026-10-05',
       vigenciaFim: '2027-08-31',
       publicadaAte: '',
+      travada: false,
       status: 'rascunho',
       versao: 1,
       pagAntecipado: { ativo: false, prazoDias: 5, taxa: 0 },
@@ -182,3 +194,84 @@ export const seed = () => ({
     },
   ],
 })
+
+import { findSetor, slotsDoDia } from './escala'
+import { presencaDe, sugestaoApuracao, apKey } from './presenca'
+import { addDays } from './utils'
+
+export const seed = () => {
+  const db = base()
+  db.usuarios = [
+    { id: 'u_admin', nome: 'Rodrigo Gomes', email: 'rodrigo.gomes@doccsc.com.br', perfil: 'admin', ativo: true },
+    { id: 'u_esc', nome: 'Marina Lopes', email: 'marina.lopes@exemplo.com', perfil: 'escalista', ativo: true },
+    { id: 'u_fat', nome: 'Carlos Menezes', email: 'carlos.menezes@exemplo.com', perfil: 'faturamento', ativo: true },
+    { id: 'u_vis', nome: 'Diretoria Técnica', email: 'diretoria@exemplo.com', perfil: 'visualizador', ativo: true },
+    { id: 'u_m1', nome: 'Ana Beatriz Moura', email: 'ana.moura@exemplo.com', perfil: 'medico', medicoId: 'm1', ativo: true },
+    { id: 'u_m4', nome: 'Diego Fontana', email: 'diego.fontana@exemplo.com', perfil: 'medico', medicoId: 'm4', ativo: true },
+    { id: 'u_m3', nome: 'Camila Teixeira', email: 'camila.teixeira@exemplo.com', perfil: 'medico', medicoId: 'm3', ativo: true },
+  ]
+  db.usuarioAtual = 'u_admin'
+
+  // Setembro já apurado na escala do PA Central
+  db.apuracoes = {}
+  const e1 = db.escalas.find((e) => e.id === 'e1')
+  const { unidade, setor } = findSetor(db, e1.crId, e1.unidadeId, e1.setorId)
+  for (let d = '2026-09-01'; d <= '2026-09-30'; d = addDays(d, 1)) {
+    for (const s of slotsDoDia(e1, setor.valores, d)) {
+      if (!s.medicoId) continue
+      const sug = sugestaoApuracao(s, presencaDe(e1, s, unidade, ''))
+      if (!sug) continue
+      db.apuracoes[apKey(e1.id, s.key)] = {
+        status: sug.glosa ? 'glosado' : 'apurado',
+        horas: sug.horas,
+        pag: sug.glosa ? 0 : sug.pag,
+        fat: sug.glosa ? 0 : sug.fat,
+        medicoId: s.medicoId,
+        por: 'Carlos Menezes',
+        em: '2026-10-02T10:00:00',
+      }
+    }
+  }
+
+  // Antecipação pendente da Dra. Ana Beatriz (3 plantões apurados de setembro)
+  const itens = Object.entries(db.apuracoes)
+    .filter(([k, a]) => a.medicoId === 'm1' && a.status === 'apurado' && k.includes('2026-09-2'))
+    .slice(0, 3)
+  const bruto = itens.reduce((t, [, a]) => t + a.pag, 0)
+  db.antecipacoes = [
+    {
+      id: 'ant1',
+      medicoId: 'm1',
+      itens: itens.map(([k]) => k),
+      bruto,
+      taxa: e1.pagAntecipado.taxa,
+      liquido: Math.round(bruto * (1 - e1.pagAntecipado.taxa / 100) * 100) / 100,
+      status: 'pendente',
+      criadoEm: '2026-10-04T18:30:00',
+    },
+  ]
+
+  db.solicitacoes = [
+    {
+      id: 'sol1',
+      tipo: 'passagem',
+      escalaId: 'e1',
+      turnoId: 't2',
+      vagaIdx: 0,
+      data: '2026-10-09',
+      medicoId: 'm4',
+      destinoId: 'm10',
+      motivo: 'Compromisso familiar',
+      status: 'pendente',
+      criadoEm: '2026-10-05T08:12:00',
+    },
+  ]
+
+  db.chats = {
+    m1: [
+      { de: 'central', autor: 'Marina Lopes', texto: 'Dra. Ana, confirmando seu plantão de amanhã às 07:00 no PA Central.', em: '2026-10-04T17:02:00' },
+      { de: 'medico', autor: 'Ana Beatriz Moura', texto: 'Confirmado, estarei lá.', em: '2026-10-04T17:10:00' },
+    ],
+  }
+  return db
+}

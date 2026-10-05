@@ -97,13 +97,18 @@ export const BASES = [
 export const baseLabel = (k) => BASES.find((b) => b.key === k)?.label || k
 
 // Usuário logado (mock do protótipo)
-export const USUARIO = 'Rodrigo Gomes'
+export let USUARIO = 'Rodrigo Gomes'
+export const setUsuarioLog = (nome) => {
+  USUARIO = nome
+}
 
 export const TIPOS_LOG = [
   { key: 'regra', label: 'Regras' },
   { key: 'periodo', label: 'Períodos' },
   { key: 'medico', label: 'Médicos' },
   { key: 'publicacao', label: 'Publicação' },
+  { key: 'apuracao', label: 'Apuração' },
+  { key: 'solicitacao', label: 'Solicitações' },
 ]
 
 /** Registra entrada no log da escala */

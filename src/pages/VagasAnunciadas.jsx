@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../lib/store'
-import { Badge, Empty, Field } from '../components/ui'
+import { Badge, Empty, EscalaFiltro, Field } from '../components/ui'
 import { AlocarModal } from './EscalaDetalhe'
 import { DIAS, addDays, brl, fimTurno, fmtDate, inicioPlantao, logEscala, todayISO, valorDiferenciado, weekday } from '../lib/utils'
 import { momentoAnuncio, slotsGlobais, statusSlot } from '../lib/escala'
@@ -16,28 +16,29 @@ const fmtQuando = (d) => d.toLocaleString('pt-BR', { day: '2-digit', month: '2-d
 export default function VagasAnunciadas({ go }) {
   const { db, update, notify } = useStore()
   const [horizonte, setHorizonte] = useState(15)
-  const [escalaId, setEscalaId] = useState('')
+  const [escalaIds, setEscalaIds] = useState([])
   const [sel, setSel] = useState(null)
   const hoje = todayISO()
   const agora = Date.now()
 
   const itens = useMemo(() => {
-    return slotsGlobais(db, hoje, addDays(hoje, horizonte), (e) => e.status === 'publicada' && (!escalaId || e.id === escalaId))
-      .filter((s) => !s.medicoId && s.data <= s.escala.publicadaAte && inicioPlantao(s.data, s.turno.inicio).getTime() > agora)
+    return slotsGlobais(db, hoje, addDays(hoje, horizonte), (e) => e.status === 'publicada' && (escalaIds.length === 0 || escalaIds.includes(e.id)))
+      .filter((s) => (!s.medicoId || s.aloc?.ofertado) && s.data <= s.escala.publicadaAte && inicioPlantao(s.data, s.turno.inicio).getTime() > agora)
       .map((s) => {
         const st = statusSlot(s.escala, s)
         const anuncio = momentoAnuncio(s.escala, s)
         const pd = s.escala.pagDiferenciado
         return {
           ...s,
-          st: st === 'anunciada' ? 'anunciada' : s.escala.anunciarVaga ? 'aguardando' : 'sem-anuncio',
+          st: st === 'ofertada' || st === 'anunciada' ? 'anunciada' : s.escala.anunciarVaga ? 'aguardando' : 'sem-anuncio',
+          ofertadoPor: st === 'ofertada' ? s.medicoId : null,
           anuncio,
           ate: inicioPlantao(s.data, s.turno.inicio).getTime() - agora,
           pagOfertado: pd?.ativo ? valorDiferenciado(s.pagBase, pd) : s.pagBase,
         }
       })
       .sort((a, b) => a.ate - b.ate)
-  }, [db, hoje, horizonte, escalaId, agora])
+  }, [db, hoje, horizonte, escalaIds, agora])
 
   const anunciadas = itens.filter((i) => i.st === 'anunciada')
   const aguardando = itens.filter((i) => i.st === 'aguardando')
@@ -64,16 +65,6 @@ export default function VagasAnunciadas({ go }) {
           <p className="muted">Vagas sem médico em escalas publicadas, do momento do anúncio automático até o início do plantão.</p>
         </div>
         <div className="filters">
-          <Field label="Escala">
-            <select id="va-escala" value={escalaId} onChange={(e) => setEscalaId(e.target.value)}>
-              <option value="">Todas as publicadas</option>
-              {publicadas.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.nome}
-                </option>
-              ))}
-            </select>
-          </Field>
           <Field label="Próximos">
             <select id="va-horizonte" value={horizonte} onChange={(e) => setHorizonte(Number(e.target.value))}>
               <option value={7}>7 dias</option>
@@ -83,6 +74,10 @@ export default function VagasAnunciadas({ go }) {
           </Field>
         </div>
       </header>
+
+      <div className="card filtro-card">
+        <EscalaFiltro escalas={publicadas} value={escalaIds} onChange={setEscalaIds} label="Filtrar por escala" />
+      </div>
 
       <div className="kpi-row">
         <div className="kpi warn">
@@ -158,7 +153,8 @@ export default function VagasAnunciadas({ go }) {
                   {itens.map((i) => (
                     <tr key={i.key + i.escala.id}>
                       <td>
-                        {i.st === 'anunciada' && <Badge tone="warn">Anunciada</Badge>}
+                        {i.st === 'anunciada' && <Badge tone="warn">{i.ofertadoPor ? 'Oferecida pelo médico' : 'Anunciada'}</Badge>}
+                        {i.ofertadoPor && <div className="muted small">{db.medicos.find((m) => m.id === i.ofertadoPor)?.nome}</div>}
                         {i.st === 'aguardando' && <Badge>A anunciar</Badge>}
                         {i.st === 'sem-anuncio' && <Badge tone="neutral">Sem anúncio</Badge>}
                       </td>
@@ -177,7 +173,7 @@ export default function VagasAnunciadas({ go }) {
                         </div>
                       </td>
                       <td className="small">
-                        {i.st === 'sem-anuncio' ? '—' : i.st === 'anunciada' ? `desde ${fmtQuando(i.anuncio)}` : `em ${fmtQuando(i.anuncio)}`}
+                        {i.ofertadoPor ? 'pelo médico' : i.st === 'sem-anuncio' ? '—' : i.st === 'anunciada' ? `desde ${fmtQuando(i.anuncio)}` : `em ${fmtQuando(i.anuncio)}`}
                       </td>
                       <td className={`num ${i.ate < 24 * 3600e3 ? 'warn-text' : ''}`}>{fmtHoras(i.ate)}</td>
                       <td className="num">

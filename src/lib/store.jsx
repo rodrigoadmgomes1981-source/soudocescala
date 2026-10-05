@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { seed } from './seed'
+import { setUsuarioLog } from './utils'
 
-const KEY = 'soudoc-escalas-v2'
+const KEY = 'soudoc-escalas-v3'
 const Ctx = createContext(null)
 
 const load = () => {
@@ -17,6 +18,7 @@ const load = () => {
 export function StoreProvider({ children }) {
   const [db, setDb] = useState(load)
   const [toast, setToast] = useState(null)
+  const [chat, setChat] = useState(null)
 
   useEffect(() => {
     try {
@@ -41,8 +43,11 @@ export function StoreProvider({ children }) {
     [],
   )
   const reset = () => setDb(seed())
+  const user = db.usuarios?.find((u) => u.id === db.usuarioAtual) || db.usuarios?.[0]
+  if (user) setUsuarioLog(user.nome)
+  const setUsuario = (id) => setDb((d) => ({ ...d, usuarioAtual: id }))
 
-  return <Ctx.Provider value={{ db, update, reset, notify, toast }}>{children}</Ctx.Provider>
+  return <Ctx.Provider value={{ db, update, reset, notify, toast, user, setUsuario, chat, abrirChat: setChat }}>{children}</Ctx.Provider>
 }
 
 // eslint-disable-next-line react-refresh/only-export-components

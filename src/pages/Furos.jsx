@@ -1,14 +1,15 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../lib/store'
-import { Badge, Empty, Field } from '../components/ui'
+import { Badge, Empty, EscalaFiltro, Field } from '../components/ui'
 import { AlocarModal } from './EscalaDetalhe'
 import { DIAS, addDays, brl, fimTurno, fmtDate, fmtDateShort, inicioPlantao, logEscala, todayISO, weekday } from '../lib/utils'
-import { hash01, slotsGlobais } from '../lib/escala'
+import { slotsGlobais } from '../lib/escala'
+import { presencaDe } from '../lib/presenca'
 
 const H = 3600e3
 const CRIT = {
   ocorrido: { label: 'Furo ocorrido', tone: 'danger', ordem: 0 },
-  ausencia: { label: 'Ausência sem check-in', tone: 'danger', ordem: 1 },
+  ausencia: { label: 'Ausência (sem check-in)', tone: 'danger', ordem: 1 },
   critico: { label: 'Risco crítico (< 24h)', tone: 'danger', ordem: 2 },
   alto: { label: 'Risco alto (< 72h)', tone: 'warn', ordem: 3 },
   moderado: { label: 'Risco moderado', tone: 'neutral', ordem: 4 },
@@ -19,13 +20,13 @@ export default function Furos({ go }) {
   const hoje = todayISO()
   const [de, setDe] = useState(addDays(hoje, -7))
   const [ate, setAte] = useState(addDays(hoje, 7))
-  const [escalaId, setEscalaId] = useState('')
+  const [escalaIds, setEscalaIds] = useState([])
   const [simular, setSimular] = useState(true)
   const [sel, setSel] = useState(null)
   const agora = Date.now()
 
   const { itens, passados } = useMemo(() => {
-    const todos = slotsGlobais(db, de, ate, (e) => e.status === 'publicada' && (!escalaId || e.id === escalaId)).filter(
+    const todos = slotsGlobais(db, de, ate, (e) => e.status === 'publicada' && (escalaIds.length === 0 || escalaIds.includes(e.id))).filter(
       (s) => s.data <= s.escala.publicadaAte,
     )
     const out = []
@@ -40,12 +41,15 @@ export default function Furos({ go }) {
         else if (ini - agora < 24 * H) tipo = 'critico'
         else if (ini - agora < 72 * H) tipo = 'alto'
         else tipo = 'moderado'
-      } else if (passou && simular && hash01(s.key + s.medicoId) < 0.05) tipo = 'ausencia'
+      } else if (passou && simular) {
+        const pr = presencaDe(s.escala, s, s.unidade, '')
+        if (pr && (pr.estado === 'ausente' || pr.estado === 'sem-checkin')) tipo = 'ausencia'
+      }
       if (tipo) out.push({ ...s, tipo, ini })
     }
     out.sort((a, b) => CRIT[a.tipo].ordem - CRIT[b.tipo].ordem || a.ini - b.ini)
     return { itens: out, passados }
-  }, [db, de, ate, escalaId, simular, agora])
+  }, [db, de, ate, escalaIds, simular, agora])
 
   const ocorridos = itens.filter((i) => i.tipo === 'ocorrido' || i.tipo === 'ausencia')
   const criticos = itens.filter((i) => i.tipo === 'critico')
@@ -81,16 +85,6 @@ export default function Furos({ go }) {
           <p className="muted">Plantões que ficaram sem médico (ocorridos) e vagas ainda abertas com risco de virar furo.</p>
         </div>
         <div className="filters">
-          <Field label="Escala">
-            <select id="fu-escala" value={escalaId} onChange={(e) => setEscalaId(e.target.value)}>
-              <option value="">Todas as publicadas</option>
-              {publicadas.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.nome}
-                </option>
-              ))}
-            </select>
-          </Field>
           <Field label="De">
             <input id="fu-de" type="date" value={de} onChange={(e) => setDe(e.target.value)} />
           </Field>
@@ -99,6 +93,10 @@ export default function Furos({ go }) {
           </Field>
         </div>
       </header>
+
+      <div className="card filtro-card">
+        <EscalaFiltro escalas={publicadas} value={escalaIds} onChange={setEscalaIds} label="Filtrar por escala" />
+      </div>
 
       <div className="kpi-row">
         <div className="kpi danger">
@@ -125,7 +123,7 @@ export default function Furos({ go }) {
 
       <label className="check small muted">
         <input id="fu-simular" type="checkbox" checked={simular} onChange={(e) => setSimular(e.target.checked)} />
-        Incluir ausências sem check-in (simuladas — no sistema real virão do controle de presença)
+        Incluir ausências: médico escalado sem nenhum registro de check-in/check-out
       </label>
 
       {itens.length === 0 ? (

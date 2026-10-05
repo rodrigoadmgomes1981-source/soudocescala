@@ -58,7 +58,7 @@ export const slotsDoDia = (escala, valores, iso) => {
 }
 
 export const statusSlot = (escala, slot) => {
-  if (slot.medicoId) return slot.aloc?.fixo ? 'fixo' : 'avulso'
+  if (slot.medicoId) return slot.aloc?.ofertado ? 'ofertada' : slot.aloc?.fixo ? 'fixo' : 'avulso'
   if (escala.status !== 'publicada' || !escala.publicadaAte || slot.data > escala.publicadaAte) return 'vazia'
   const agora = Date.now()
   if (inicioPlantao(slot.data, slot.turno.inicio).getTime() <= agora) return 'furo'

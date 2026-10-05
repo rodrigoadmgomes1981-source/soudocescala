@@ -23,15 +23,21 @@ import {
   weekday,
 } from '../lib/utils'
 import { checarMedico, findSetor, naVigencia, resumoPeriodo, slotsDoDia, statusSlot } from '../lib/escala'
+import { ESTADO_PRES, presencaDe } from '../lib/presenca'
+import { PresencaPainel } from '../components/Presenca'
+import ApuracaoTabela from '../components/Apuracao'
+import MedicoAcoesModal from '../components/MedicoAcoes'
+import { can, podeDestravar } from '../lib/perms'
 
 const TABS = [
-  { key: 'grade', label: 'Grade e médicos' },
-  { key: 'config', label: 'Configuração' },
-  { key: 'fin', label: 'Financeiro planejado' },
-  { key: 'hist', label: 'Log de alterações' },
+  { key: 'grade', label: 'Grade e médicos', perm: 'grade' },
+  { key: 'config', label: 'Configuração', perm: 'config' },
+  { key: 'apuracao', label: 'Apuração', perm: 'apurar' },
+  { key: 'fin', label: 'Financeiro planejado', perm: 'fin' },
+  { key: 'hist', label: 'Log de alterações', perm: 'log' },
 ]
 
-const STATUS_LABEL = { fixo: 'Fixo', avulso: 'Avulso', anunciada: 'Vaga anunciada', vazia: 'Vaga aberta', furo: 'Furo (plantão sem médico)' }
+const STATUS_LABEL = { ofertada: 'Plantão oferecido pelo médico', fixo: 'Fixo', avulso: 'Avulso', anunciada: 'Vaga anunciada', vazia: 'Vaga aberta', furo: 'Furo (plantão sem médico)' }
 
 const aprov = (v) => (v === 'automatica' ? 'Automática' : 'Com aprovação')
 const presencaTxt = (p) => p.map((x) => (x === 'facial' ? 'Facial' : 'Geolocalização')).join(' + ') || '—'
@@ -62,7 +68,7 @@ const diffRegras = (a, b) =>
   CAMPOS.map(([campo, f]) => ({ campo, de: f(a), para: f(b) })).filter((x) => x.de !== x.para)
 
 export default function EscalaDetalhe({ id, semanaInicial, go }) {
-  const { db, update, notify } = useStore()
+  const { db, update, notify, user, abrirChat } = useStore()
   const escala = db.escalas.find((e) => e.id === id)
   const [tab, setTab] = useState('grade')
   const [semana, setSemana] = useState(() => {
@@ -74,6 +80,8 @@ export default function EscalaDetalhe({ id, semanaInicial, go }) {
   const [slotSel, setSlotSel] = useState(null)
   const [publicar, setPublicar] = useState(false)
   const [draft, setDraft] = useState(null) // cópia local das regras em edição
+  const [apDe, setApDe] = useState(() => todayISO().slice(0, 8) + '01')
+  const [apAte, setApAte] = useState(todayISO())
 
   if (!escala)
     return (
@@ -87,6 +95,30 @@ export default function EscalaDetalhe({ id, semanaInicial, go }) {
 
   const { cr, unidade, setor } = findSetor(db, escala.crId, escala.unidadeId, escala.setorId)
   const valores = setor?.valores
+  const travada = !!escala.travada
+  const ehMedico = user?.perfil === 'medico'
+  const pode = {
+    grade: true,
+    editar: can(user, 'escalas.editar') && !travada,
+    alocar: can(user, 'escalas.alocar') && !travada,
+    publicar: can(user, 'escalas.publicar') && !travada,
+    travar: can(user, 'escalas.travar'),
+    destravar: podeDestravar(user),
+    config: can(user, 'escalas.editar'),
+    fin: can(user, 'financeiro.ver'),
+    apurar: can(user, 'apuracao'),
+    log: !ehMedico && user?.perfil !== 'visualizador',
+    presenca: can(user, 'presenca.ver'),
+    chat: can(user, 'chat'),
+  }
+  if (ehMedico && !escala.alocacoes.some((a) => a.medicoId === user.medicoId))
+    return (
+      <div className="page">
+        <p className="alert warn">Você só pode visualizar escalas em que está inserido.</p>
+      </div>
+    )
+  const tabsVisiveis = TABS.filter((t) => pode[t.perm])
+  const tabAtual = tabsVisiveis.some((t) => t.key === tab) ? tab : 'grade'
 
   /** Edita a escala no banco, registra no log e marca pendência se já publicada */
   const setE = (fn, log) =>
@@ -117,6 +149,18 @@ export default function EscalaDetalhe({ id, semanaInicial, go }) {
     notify('Alterações salvas e registradas no log')
   }
 
+  const alternarTrava = (on) => {
+    update((d) => {
+      const e = d.escalas.find((x) => x.id === id)
+      e.travada = on
+      e.travadaPor = on ? user?.nome : null
+      e.travadaEm = on ? new Date().toISOString() : null
+      logEscala(e, 'regra', on ? 'Escala travada para alterações' : 'Escala destravada')
+    })
+    setDraft(null)
+    notify(on ? 'Escala travada' : 'Escala destravada', on ? 'ok' : 'warn')
+  }
+
   const dias = Array.from({ length: 7 }, (_, i) => addDays(semana, i))
   const temAloc = (t) => escala.alocacoes.some((a) => a.turnoId === t.id && a.medicoId)
 
@@ -137,13 +181,31 @@ export default function EscalaDetalhe({ id, semanaInicial, go }) {
           <Badge tone={escala.status === 'publicada' ? 'ok' : 'neutral'}>
             {escala.status === 'publicada' ? `Publicada até ${fmtDate(escala.publicadaAte)} · v${escala.versao}` : `Rascunho · v${escala.versao}`}
           </Badge>
-          <button className="btn primary" onClick={() => setPublicar(true)}>
-            {escala.status === 'publicada' ? 'Atualizar publicação' : 'Publicar escala'}
-          </button>
+          {travada && <Badge tone="neutral">Travada</Badge>}
+          {pode.publicar && (
+            <button className="btn primary" onClick={() => setPublicar(true)}>
+              {escala.status === 'publicada' ? 'Atualizar publicação' : 'Publicar escala'}
+            </button>
+          )}
         </div>
       </header>
 
-      {escala.pendente && (
+      {travada && !ehMedico && (
+        <div className="lock-banner">
+          <span>
+            <b>Escala travada</b> por {escala.travadaPor || '—'}
+            {escala.travadaEm ? ` em ${new Date(escala.travadaEm).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}` : ''}. Nenhuma alteração
+            de regras, períodos, médicos ou publicação é permitida.
+          </span>
+          {pode.destravar && (
+            <button className="btn sm" onClick={() => alternarTrava(false)}>
+              Destravar
+            </button>
+          )}
+        </div>
+      )}
+
+      {escala.pendente && pode.publicar && (
         <div className="alert warn row">
           <span>Há alterações feitas depois da publicação. Os médicos ainda veem a versão v{escala.versao}.</span>
           <button className="btn sm" onClick={() => setPublicar(true)}>
@@ -153,18 +215,74 @@ export default function EscalaDetalhe({ id, semanaInicial, go }) {
       )}
 
       <nav className="tabs">
-        {TABS.map((t) => (
-          <button key={t.key} className={tab === t.key ? 'on' : ''} onClick={() => setTab(t.key)}>
+        {tabsVisiveis.map((t) => (
+          <button key={t.key} className={tabAtual === t.key ? 'on' : ''} onClick={() => setTab(t.key)}>
             {t.label}
             {t.key === 'hist' && <span className="muted small"> ({escala.historico.length})</span>}
           </button>
         ))}
       </nav>
 
-      {tab === 'grade' && <Grade escala={escala} valores={valores} dias={dias} semana={semana} setSemana={setSemana} onSlot={setSlotSel} />}
+      {tabAtual === 'grade' && (
+        <Grade
+          escala={escala}
+          valores={valores}
+          unidade={unidade}
+          dias={dias}
+          semana={semana}
+          setSemana={setSemana}
+          onSlot={setSlotSel}
+          meuMedicoId={ehMedico ? user.medicoId : null}
+          verValores={pode.fin}
+          clicavel={(s) => (ehMedico ? s.medicoId === user.medicoId : pode.alocar || (s.medicoId && pode.presenca))}
+        />
+      )}
 
-      {tab === 'config' && (
+      {tabAtual === 'apuracao' && (
+        <div className="card">
+          <div className="card-head">
+            <h2>Apuração de plantões</h2>
+            <div className="inline-fields">
+              <Field label="De">
+                <input id="ap-de" type="date" value={apDe} onChange={(e) => setApDe(e.target.value)} />
+              </Field>
+              <Field label="Até">
+                <input id="ap-ate" type="date" value={apAte} min={apDe} onChange={(e) => setApAte(e.target.value)} />
+              </Field>
+            </div>
+          </div>
+          <ApuracaoTabela escalaIds={[escala.id]} de={apDe} ate={apAte} mostrarEscala={false} />
+        </div>
+      )}
+
+      {tabAtual === 'config' && (
         <div className="stack">
+          <div className={`card lock-card ${travada ? 'on' : ''}`}>
+            <div>
+              <h2>{travada ? 'Escala travada' : 'Travar escala'}</h2>
+              <p className="muted small">
+                {travada
+                  ? 'Regras, períodos, médicos e publicação estão bloqueados. Somente o administrador pode destravar.'
+                  : 'Bloqueia qualquer alteração na escala (regras, períodos, médicos, publicação e solicitações dos médicos).'}
+              </p>
+            </div>
+            {travada ? (
+              pode.destravar ? (
+                <button className="btn" onClick={() => alternarTrava(false)}>
+                  Destravar escala
+                </button>
+              ) : (
+                <span className="muted small">Peça ao administrador para destravar.</span>
+              )
+            ) : (
+              pode.travar && (
+                <button className="btn primary" onClick={() => alternarTrava(true)}>
+                  Travar escala
+                </button>
+              )
+            )}
+          </div>
+          <fieldset className="bare stack" disabled={travada}>
           <div className="card">
             <h2>Dias e períodos</h2>
             <p className="muted small" style={{ marginBottom: 12 }}>
@@ -216,7 +334,8 @@ export default function EscalaDetalhe({ id, semanaInicial, go }) {
               </Field>
             </div>
           </div>
-          {mudancas.length > 0 && (
+          </fieldset>
+          {mudancas.length > 0 && !travada && (
             <div className="save-bar">
               <span className="muted">
                 {mudancas.length} {mudancas.length > 1 ? 'alterações não salvas' : 'alteração não salva'}
@@ -232,15 +351,29 @@ export default function EscalaDetalhe({ id, semanaInicial, go }) {
         </div>
       )}
 
-      {tab === 'fin' && <Financeiro escala={escala} valores={valores} />}
+      {tabAtual === 'fin' && <Financeiro escala={escala} valores={valores} />}
 
-      {tab === 'hist' && <LogAlteracoes escala={escala} />}
+      {tabAtual === 'hist' && <LogAlteracoes escala={escala} />}
 
-      {slotSel && (
+      {slotSel && ehMedico && <MedicoAcoesModal escala={escala} slot={slotSel} onClose={() => setSlotSel(null)} />}
+
+      {slotSel && !ehMedico && (
         <AlocarModal
           db={db}
           escala={escala}
           slot={slotSel}
+          unidade={unidade}
+          podeAlocar={pode.alocar}
+          podePresenca={pode.presenca}
+          verValores={pode.fin}
+          onChat={
+            pode.chat
+              ? (ctx) => {
+                  setSlotSel(null)
+                  abrirChat(ctx)
+                }
+              : null
+          }
           onClose={() => setSlotSel(null)}
           onSave={(fn, log) => {
             setE(fn, { tipo: 'medico', acao: log })
@@ -368,7 +501,7 @@ function FragmentDiff({ d }) {
 
 /* ------------------------------------------------------------------ */
 
-function Grade({ escala, valores, dias, semana, setSemana, onSlot }) {
+function Grade({ escala, valores, unidade, dias, semana, setSemana, onSlot, meuMedicoId, verValores = true, clicavel = () => true }) {
   const { db } = useStore()
   const nomeMed = (mid) => db.medicos.find((m) => m.id === mid)?.nome || '—'
   const turnos = [...escala.turnos].sort((a, b) => toMin(a.inicio) - toMin(b.inicio))
@@ -407,12 +540,16 @@ function Grade({ escala, valores, dias, semana, setSemana, onSlot }) {
               <b>{anunciadas}</b> anunciadas
             </span>
           )}
-          <span>
-            Fatura <b>{brl(r.fat)}</b>
-          </span>
-          <span>
-            Paga <b>{brl(r.pag)}</b>
-          </span>
+          {verValores && (
+            <>
+              <span>
+                Fatura <b>{brl(r.fat)}</b>
+              </span>
+              <span>
+                Paga <b>{brl(r.pag)}</b>
+              </span>
+            </>
+          )}
         </div>
       </div>
 
@@ -455,15 +592,32 @@ function Grade({ escala, valores, dias, semana, setSemana, onSlot }) {
                       <div className="slots">
                         {slots.map((s) => {
                           const st = statusSlot(escala, s)
+                          const pres = s.medicoId ? presencaDe(escala, s, unidade, nomeMed(s.medicoId)) : null
+                          const corP = pres?.cor ? `p-${pres.cor}` : ''
+                          const meu = meuMedicoId && s.medicoId === meuMedicoId
+                          const ok = clicavel(s)
                           return (
-                            <button key={s.key} className={`slot ${st}`} onClick={() => onSlot(s)} title={`${STATUS_LABEL[st]} · fatura ${brl(s.fat)} · paga ${brl(s.pag)}`}>
+                            <button
+                              key={s.key}
+                              className={`slot ${st} ${corP} ${meu ? 'meu' : ''}`}
+                              disabled={!ok}
+                              onClick={() => ok && onSlot(s)}
+                              title={`${pres?.estado && pres.estado !== 'futuro' ? ESTADO_PRES[pres.estado].label + ' · ' : ''}${STATUS_LABEL[st]}${verValores ? ` · fatura ${brl(s.fat)} · paga ${brl(s.pag)}` : ''}`}
+                            >
                               {s.medicoId ? (
                                 <>
                                   <span className="slot-name">{nomeMed(s.medicoId).split(' ').slice(0, 2).join(' ')}</span>
-                                  <span className="slot-tag">
-                                    {st === 'fixo' ? 'Fixo' : 'Avulso'}
-                                    {s.diferenciado && <span className="dif">Dif.</span>}
-                                  </span>
+                                  {pres && pres.estado !== 'futuro' ? (
+                                    <span className="pres">
+                                      <span>E {pres.checkin?.hora || '--:--'}</span>
+                                      <span>S {pres.checkout?.hora || (pres.estado === 'andamento' ? '…' : '--:--')}</span>
+                                    </span>
+                                  ) : (
+                                    <span className="slot-tag">
+                                      {st === 'ofertada' ? 'Oferecido pelo médico' : st === 'fixo' ? 'Fixo' : 'Avulso'}
+                                      {s.diferenciado && <span className="dif">Dif.</span>}
+                                    </span>
+                                  )}
                                 </>
                               ) : (
                                 <>
@@ -485,6 +639,21 @@ function Grade({ escala, valores, dias, semana, setSemana, onSlot }) {
         </table>
       </div>
       <div className="legend">
+        <span className="legend-group">
+          <b>Presença:</b>
+          <span>
+            <i className="sw p-verde" /> Check-in e check-out
+          </span>
+          <span>
+            <i className="sw p-amarelo" /> Falta um registro
+          </span>
+          <span>
+            <i className="sw p-vermelho" /> Nenhum registro
+          </span>
+          <span>
+            <i className="sw p-azul" /> Em andamento
+          </span>
+        </span>
         <span>
           <i className="sw fixo" /> Fixo
         </span>
@@ -517,9 +686,10 @@ function Grade({ escala, valores, dias, semana, setSemana, onSlot }) {
 
 /* ------------------------------------------------------------------ */
 
-export function AlocarModal({ db, escala, slot, onClose, onSave }) {
+export function AlocarModal({ db, escala, slot, unidade, podeAlocar = true, podePresenca = true, onChat, onClose, onSave, verValores = true }) {
   const ocupado = !!slot.medicoId
-  const [modo, setModo] = useState(ocupado ? 'ver' : 'inserir')
+  const [modo, setModo] = useState(ocupado || !podeAlocar ? 'ver' : 'inserir')
+  const [aba, setAba] = useState('medico')
   const [medicoId, setMedicoId] = useState('')
   const stInicial = statusSlot(escala, slot)
   const urgente = stInicial === 'anunciada' || stInicial === 'furo'
@@ -597,6 +767,8 @@ export function AlocarModal({ db, escala, slot, onClose, onSave }) {
   const fixoAtual = escala.alocacoes.find(
     (a) => a.fixo && a.medicoId && a.turnoId === turno.id && a.vagaIdx === slot.vagaIdx && a.desde <= data && (!a.ate || a.ate >= data),
   )
+  const pres = slot.medicoId ? presencaDe(escala, slot, unidade, med?.nome) : null
+  const ctxTxt = `${DIAS[weekday(data)]} ${fmtDate(data)} ${turno.inicio}–${fimTurno(turno.inicio, turno.duracao)} · ${escala.nome}`
   const bloqueado = !medicoId || (checagem && checagem.conflitos.length > 0)
 
   return (
@@ -607,6 +779,13 @@ export function AlocarModal({ db, escala, slot, onClose, onSave }) {
       footer={
         modo === 'ver' ? (
           <>
+            {onChat && (slot.medicoId || slot.aloc?.medicoId) && (
+              <button className="btn" onClick={() => onChat({ medicoId: slot.medicoId, contexto: { texto: ctxTxt } })}>
+                Acionar pelo chat
+              </button>
+            )}
+            {podeAlocar && ocupado && (
+              <>
             <button className="btn ghost danger" onClick={liberarData}>
               Retirar só nesta data
             </button>
@@ -615,10 +794,14 @@ export function AlocarModal({ db, escala, slot, onClose, onSave }) {
                 Encerrar fixo a partir daqui
               </button>
             )}
+              </>
+            )}
             <div className="spacer" />
-            <button className="btn primary" onClick={() => setModo('inserir')}>
-              Substituir médico
-            </button>
+            {podeAlocar && (
+              <button className="btn primary" onClick={() => setModo('inserir')}>
+                {ocupado ? 'Substituir médico' : 'Inserir médico'}
+              </button>
+            )}
           </>
         ) : (
           <>
@@ -633,7 +816,7 @@ export function AlocarModal({ db, escala, slot, onClose, onSave }) {
         )
       }
     >
-      <div className="slot-info">
+      <div className="slot-info" style={verValores ? undefined : { gridTemplateColumns: '1fr 1fr' }}>
         <div>
           <span className="muted small">Vaga</span>
           <b>
@@ -644,17 +827,38 @@ export function AlocarModal({ db, escala, slot, onClose, onSave }) {
           <span className="muted small">Tipo</span>
           <b>{TIPOS_VALOR.find((t) => t.key === slot.tipo)?.label}</b>
         </div>
-        <div>
-          <span className="muted small">Fatura</span>
-          <b>{brl(slot.fat)}</b>
-        </div>
-        <div>
-          <span className="muted small">Paga</span>
-          <b>{brl(slot.pag)}</b>
-        </div>
+        {verValores && (
+          <>
+            <div>
+              <span className="muted small">Fatura</span>
+              <b>{brl(slot.fat)}</b>
+            </div>
+            <div>
+              <span className="muted small">Paga</span>
+              <b>{brl(slot.pag)}</b>
+            </div>
+          </>
+        )}
       </div>
 
-      {modo === 'ver' && med && (
+      {modo === 'ver' && !med && (
+        <p className="muted">Vaga sem médico{statusSlot(escala, slot) === 'furo' ? ' · o plantão já começou (furo)' : ''}.</p>
+      )}
+
+      {modo === 'ver' && med && pres && pres.estado !== 'futuro' && podePresenca && (
+        <nav className="tabs" style={{ marginBottom: 14 }}>
+          <button className={aba === 'medico' ? 'on' : ''} onClick={() => setAba('medico')}>
+            Médico
+          </button>
+          <button className={aba === 'presenca' ? 'on' : ''} onClick={() => setAba('presenca')}>
+            Check-in / check-out
+          </button>
+        </nav>
+      )}
+
+      {modo === 'ver' && med && aba === 'presenca' && <PresencaPainel escala={escala} slot={slot} unidade={unidade} pres={pres} />}
+
+      {modo === 'ver' && med && aba === 'medico' && (
         <div className="med-atual">
           <div className="avatar">{med.nome.split(' ').map((p) => p[0]).slice(0, 2).join('')}</div>
           <div>

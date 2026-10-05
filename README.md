@@ -33,6 +33,18 @@ Os dados ficam no `localStorage` do navegador (não há backend ainda). O botão
   (acréscimo em % ou R$, prazo D+n; aplicado na alocação avulsa de vaga anunciada/furo).
 - Navegação sem depender da URL (corrige o travamento ao criar escala na prévia).
 
+### Novidades da v3
+- **Unidades**: estado → cidade (5.570 municípios IBGE embutidos), endereço completo, geolocalização (colar coordenadas do Google Maps) e botão **Salvar unidade e setores** (rascunho por unidade).
+- **Presença na grade**: horários de check-in/check-out em cada plantão e cores — verde (os dois), amarelo (falta um), vermelho (nenhum), azul (em andamento). Registros simulados.
+- **Modal do plantão**: aba Check-in/check-out com fotos (facial) e endereço + distância até a unidade (geolocalização); botão **Acionar pelo chat**.
+- **Chat de atendimento** central ⇄ médico, com mensagens prontas por plantão.
+- **Travar escala** (Configuração): bloqueia regras, períodos, médicos, publicação e solicitações; só o admin destrava.
+- **Apuração em lote** (aba da escala e página Apuração): seleção múltipla, apurar conforme presença, integral, glosar ou reabrir.
+- **Filtro por escala** (múltipla escolha) em Furos, Vagas anunciadas e Apuração.
+- **Perfis**: Administrador, Escalista, Faturamento, Visualização e Médico (troca em “Acessando como”). Página **Usuários e perfis** para o admin.
+- **Médico**: agenda, horas planejadas × executadas, valores (acumulado até hoje e a receber), antecipação de plantões apurados (validação do faturamento), passar/trocar/anunciar plantão conforme a regra da escala.
+- **Solicitações** (escalista aprova passagem/troca) e **Antecipações** (faturamento aprova/recusa).
+
 ## Rodar local
 
 ```bash

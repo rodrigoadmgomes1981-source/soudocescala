@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useStore } from '../lib/store'
 import { Field, Badge } from '../components/ui'
 import { RegrasForm, TurnosEditor, descTurno } from '../components/EscalaForms'
-import { TIPOS_VALOR, USUARIO, brl, fmtDate, logEscala, todayISO, uid } from '../lib/utils'
+import { TIPOS_VALOR, brl, fmtDate, logEscala, todayISO, uid } from '../lib/utils'
 import { findSetor } from '../lib/escala'
 
 const PASSOS = ['Local', 'Regras', 'Dias e períodos', 'Vigência']
@@ -38,7 +38,7 @@ const nova = () => ({
 })
 
 export default function NovaEscala({ id, go }) {
-  const { db, update, notify } = useStore()
+  const { db, update, notify, user } = useStore()
   const existente = id && db.escalas.find((x) => x.id === id && x.incompleta)
   const [e, setE] = useState(() => (existente ? structuredClone(existente) : nova()))
   const [passo, setPasso] = useState(existente?.passo || 0)
@@ -130,7 +130,7 @@ export default function NovaEscala({ id, go }) {
           </button>
           <h1>{existente ? 'Continuar escala' : 'Nova escala'}</h1>
           <p className="muted small">
-            Criada por {USUARIO}.{' '}
+            Criada por {user?.nome}.{' '}
             {salvoEm && <span className="autosave">{salvoEm === 'retomado' ? 'Rascunho retomado.' : `Rascunho salvo às ${salvoEm}.`}</span>}
           </p>
         </div>
