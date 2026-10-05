@@ -1,4 +1,4 @@
-import { addDays, toMin, valorTurno, weekday, todayISO } from './utils'
+import { addDays, toMin, valorTurno, weekday, valorDiferenciado, inicioPlantao } from './utils'
 
 export const findSetor = (db, crId, unidadeId, setorId) => {
   const cr = db.contratos.find((c) => c.id === crId)
@@ -38,15 +38,18 @@ export const slotsDoDia = (escala, valores, iso) => {
       const v = valorTurno(valores, t.inicio, t.duracao, iso)
       for (let i = 0; i < t.vagas; i++) {
         const aloc = alocacaoDe(escala, t.id, i, iso)
+        const dif = !!aloc?.medicoId && !!aloc?.diferenciado && !!escala.pagDiferenciado?.ativo
         out.push({
           key: `${t.id}-${i}-${iso}`,
+          diferenciado: dif,
+          pagBase: v.pag,
           data: iso,
           turno: t,
           vagaIdx: i,
           aloc,
           medicoId: aloc?.medicoId || null,
           fat: v.fat,
-          pag: v.pag,
+          pag: dif ? valorDiferenciado(v.pag, escala.pagDiferenciado) : v.pag,
           tipo: v.tipo,
         })
       }
@@ -56,17 +59,10 @@ export const slotsDoDia = (escala, valores, iso) => {
 
 export const statusSlot = (escala, slot) => {
   if (slot.medicoId) return slot.aloc?.fixo ? 'fixo' : 'avulso'
-  const hoje = todayISO()
-  if (
-    escala.anunciarVaga &&
-    escala.status === 'publicada' &&
-    escala.publicadaAte &&
-    slot.data <= escala.publicadaAte &&
-    slot.data >= hoje
-  ) {
-    const limite = addDays(hoje, Math.ceil((escala.anuncioHorasAntes || 0) / 24))
-    return slot.data <= limite ? 'anunciada' : 'vazia'
-  }
+  if (escala.status !== 'publicada' || !escala.publicadaAte || slot.data > escala.publicadaAte) return 'vazia'
+  const agora = Date.now()
+  if (inicioPlantao(slot.data, slot.turno.inicio).getTime() <= agora) return 'furo'
+  if (escala.anunciarVaga && agora >= momentoAnuncio(escala, slot).getTime()) return 'anunciada'
   return 'vazia'
 }
 
@@ -134,4 +130,30 @@ export const resumoPeriodo = (escala, valores, de, ate) => {
     d = addDays(d, 1)
   }
   return r
+}
+
+/** Momento (Date) em que uma vaga vazia passa a ser anunciada */
+export const momentoAnuncio = (escala, slot) =>
+  new Date(inicioPlantao(slot.data, slot.turno.inicio).getTime() - (escala.anuncioHorasAntes || 0) * 3600e3)
+
+/** Itera slots de todas as escalas válidas num intervalo de datas */
+export const slotsGlobais = (db, de, ate, filtro = () => true) => {
+  const out = []
+  for (const e of db.escalas.filter((x) => !x.incompleta && filtro(x))) {
+    const { cr, unidade, setor } = findSetor(db, e.crId, e.unidadeId, e.setorId)
+    let d = de
+    let g = 0
+    while (d <= ate && g++ < 400) {
+      for (const s of slotsDoDia(e, setor?.valores, d)) out.push({ ...s, escala: e, cr, unidade, setor })
+      d = addDays(d, 1)
+    }
+  }
+  return out
+}
+
+/** Hash determinístico 0..1 (simulação de ausências) */
+export const hash01 = (str) => {
+  let h = 2166136261
+  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619)
+  return ((h >>> 0) % 1000) / 1000
 }

@@ -5,15 +5,23 @@ import Escalas from './pages/Escalas'
 import NovaEscala from './pages/NovaEscala'
 import EscalaDetalhe from './pages/EscalaDetalhe'
 import Medicos from './pages/Medicos'
+import VagasAnunciadas from './pages/VagasAnunciadas'
+import Furos from './pages/Furos'
 
 const parseHash = () => {
-  const [page = 'escalas', id] = window.location.hash.replace(/^#\/?/, '').split('/')
-  return { page: page || 'escalas', id }
+  try {
+    const [page = 'escalas', id, semana] = window.location.hash.replace(/^#\/?/, '').split('/')
+    return { page: page || 'escalas', id, semana }
+  } catch {
+    return { page: 'escalas' }
+  }
 }
 
 const NAV = [
   { key: 'contratos', label: 'Contratos (CR)', icon: '▤' },
   { key: 'escalas', label: 'Escalas', icon: '▦' },
+  { key: 'vagas', label: 'Vagas anunciadas', icon: '◎' },
+  { key: 'furos', label: 'Furos de escala', icon: '△' },
   { key: 'medicos', label: 'Médicos', icon: '◉' },
 ]
 
@@ -28,10 +36,20 @@ export default function App() {
     return () => window.removeEventListener('hashchange', h)
   }, [])
 
+  // Navegação por estado; o hash é só um espelho (o ambiente de prévia pode bloquear alterações de URL)
   const go = (r) => {
-    window.location.hash = `/${r.page}${r.id ? '/' + r.id : ''}`
+    setRoute(r)
     setMenu(false)
-    window.scrollTo(0, 0)
+    try {
+      window.history.replaceState(null, '', `#/${r.page}${r.id ? '/' + r.id : ''}${r.semana ? '/' + r.semana : ''}`)
+    } catch {
+      /* ignore */
+    }
+    try {
+      window.scrollTo(0, 0)
+    } catch {
+      /* ignore */
+    }
   }
 
   const ativo = ['nova', 'escala'].includes(route.page) ? 'escalas' : route.page
@@ -61,6 +79,7 @@ export default function App() {
             <li>Criar escala: local, regras e períodos</li>
             <li>Inserir médicos (fixo ou avulso)</li>
             <li>Definir vigência e publicar</li>
+            <li>Acompanhar vagas anunciadas e furos</li>
           </ol>
         </div>
         <button
@@ -84,9 +103,11 @@ export default function App() {
         </div>
         {route.page === 'contratos' && <Contratos go={go} />}
         {route.page === 'escalas' && <Escalas go={go} />}
-        {route.page === 'nova' && <NovaEscala go={go} />}
-        {route.page === 'escala' && <EscalaDetalhe key={route.id} id={route.id} go={go} />}
+        {route.page === 'nova' && <NovaEscala key={route.id || 'nova'} id={route.id} go={go} />}
+        {route.page === 'escala' && <EscalaDetalhe key={route.id + (route.semana || '')} id={route.id} semanaInicial={route.semana} go={go} />}
         {route.page === 'medicos' && <Medicos go={go} />}
+        {route.page === 'vagas' && <VagasAnunciadas go={go} />}
+        {route.page === 'furos' && <Furos go={go} />}
       </div>
       {menu && <div className="scrim" onClick={() => setMenu(false)} />}
       {toast && <div className={`toast ${toast.tipo}`}>{toast.msg}</div>}

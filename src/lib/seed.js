@@ -7,7 +7,7 @@ const v = (du, nu, df, nf) => ({
 })
 
 export const seed = () => ({
-  versao: 1,
+  versao: 2,
   contratos: [
     {
       id: 'cr1',
@@ -125,10 +125,15 @@ export const seed = () => ({
       publicadaAte: '2026-10-31',
       status: 'publicada',
       versao: 2,
+      pagAntecipado: { ativo: true, prazoDias: 5, taxa: 2.5 },
+      pagDiferenciado: { ativo: true, tipo: 'percentual', valor: 20, prazoDias: 2 },
       historico: [
-        { em: '2026-09-25T10:12:00', acao: 'Escala criada' },
-        { em: '2026-09-28T16:40:00', acao: 'Publicada até 31/10/2026 (v1)' },
-        { em: '2026-10-02T09:05:00', acao: 'Alteração após publicação — nova versão v2' },
+        { em: '2026-09-25T10:12:00', usuario: 'Rodrigo Gomes', tipo: 'regra', acao: 'Escala criada' },
+        { em: '2026-09-25T10:20:00', usuario: 'Rodrigo Gomes', tipo: 'periodo', acao: 'Período adicionado: Todos os dias · 07:00–19:00 (12h) · 2 médicos' },
+        { em: '2026-09-25T10:22:00', usuario: 'Rodrigo Gomes', tipo: 'periodo', acao: 'Período adicionado: Todos os dias · 19:00–07:00 (12h) · 2 médicos' },
+        { em: '2026-09-28T16:40:00', usuario: 'Rodrigo Gomes', tipo: 'publicacao', acao: 'Publicada até 31/10/2026 (v1)' },
+        { em: '2026-10-02T09:05:00', usuario: 'Coord. Clínica Médica', tipo: 'regra', acao: 'Regras alteradas', detalhes: [{ campo: 'Base de faturamento', de: 'Realizado', para: 'Apurado' }] },
+        { em: '2026-10-02T09:06:00', usuario: 'Coord. Clínica Médica', tipo: 'publicacao', acao: 'Republicada até 31/10/2026 (v2)' },
       ],
       turnos: [
         { id: 't1', inicio: '07:00', duracao: 12, vagas: 2, dias: [0, 1, 2, 3, 4, 5, 6] },
@@ -139,7 +144,7 @@ export const seed = () => ({
         { id: 'a2', turnoId: 't1', vagaIdx: 1, medicoId: 'm2', fixo: true, desde: '2026-10-01' },
         { id: 'a3', turnoId: 't2', vagaIdx: 0, medicoId: 'm4', fixo: true, desde: '2026-10-01' },
         { id: 'a4', turnoId: 't2', vagaIdx: 1, medicoId: 'm10', fixo: false, data: '2026-10-05' },
-        { id: 'a5', turnoId: 't2', vagaIdx: 1, medicoId: 'm3', fixo: false, data: '2026-10-06' },
+        { id: 'a5', turnoId: 't2', vagaIdx: 1, medicoId: 'm3', fixo: false, data: '2026-10-06', diferenciado: true },
         { id: 'a6', turnoId: 't1', vagaIdx: 1, medicoId: null, fixo: false, data: '2026-10-07' },
       ],
     },
@@ -164,7 +169,9 @@ export const seed = () => ({
       publicadaAte: '',
       status: 'rascunho',
       versao: 1,
-      historico: [{ em: '2026-10-03T14:20:00', acao: 'Escala criada' }],
+      pagAntecipado: { ativo: false, prazoDias: 5, taxa: 0 },
+      pagDiferenciado: { ativo: false, tipo: 'valor', valor: 300, prazoDias: 2 },
+      historico: [{ em: '2026-10-03T14:20:00', usuario: 'Rodrigo Gomes', tipo: 'regra', acao: 'Escala criada' }],
       turnos: [
         { id: 't3', inicio: '07:00', duracao: 24, vagas: 1, dias: [1, 3, 5] },
         { id: 't4', inicio: '07:00', duracao: 24, vagas: 1, dias: [0, 2, 4, 6] },

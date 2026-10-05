@@ -21,6 +21,17 @@ Os dados ficam no `localStorage` do navegador (não há backend ainda). O botão
 4. **Publicar** — define até quando a escala fica publicada; alterações depois da
    publicação geram aviso e nova versão ao republicar.
 5. **Financeiro planejado** — fatura, paga, margem e ocupação por período.
+6. **Log de alterações** — cada mudança (regras, períodos, médicos, publicação) com usuário, data/hora e valor anterior → novo.
+7. **Vagas anunciadas** — painel com vagas no mural, a anunciar e sem anúncio; preencher direto do painel.
+8. **Furos de escala** — furos ocorridos, risco crítico/alto/moderado, taxa de furo e faturamento afetado.
+
+### Novidades da v2
+- Períodos com botão **Alterar**, seletor **Diurno / Noturno / 24h / Personalizado** e **salvamento a cada período**
+  (o assistente grava o rascunho a cada passo; dá para sair e continuar depois).
+- Aviso de sobreposição entre períodos.
+- Parâmetros **Pagamento antecipado** (prazo D+n e taxa) e **Pagamento diferenciado antecipado**
+  (acréscimo em % ou R$, prazo D+n; aplicado na alocação avulsa de vaga anunciada/furo).
+- Navegação sem depender da URL (corrige o travamento ao criar escala na prévia).
 
 ## Rodar local
 

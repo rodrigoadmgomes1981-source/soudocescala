@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../lib/store'
 import { Badge, Field, Modal, Segmented } from '../components/ui'
-import { RegrasForm, TurnosEditor } from '../components/EscalaForms'
+import { RegrasForm, TurnosEditor, descTurno } from '../components/EscalaForms'
 import {
+  BASES,
   DIAS,
   FERIADOS,
+  TIPOS_LOG,
   TIPOS_VALOR,
   addDays,
   baseLabel,
@@ -12,6 +14,7 @@ import {
   fimTurno,
   fmtDate,
   fmtDateShort,
+  logEscala,
   parseISO,
   startOfWeek,
   todayISO,
@@ -25,22 +28,52 @@ const TABS = [
   { key: 'grade', label: 'Grade e médicos' },
   { key: 'config', label: 'Configuração' },
   { key: 'fin', label: 'Financeiro planejado' },
-  { key: 'hist', label: 'Histórico' },
+  { key: 'hist', label: 'Log de alterações' },
 ]
 
-const STATUS_LABEL = { fixo: 'Fixo', avulso: 'Avulso', anunciada: 'Vaga anunciada', vazia: 'Vaga aberta' }
+const STATUS_LABEL = { fixo: 'Fixo', avulso: 'Avulso', anunciada: 'Vaga anunciada', vazia: 'Vaga aberta', furo: 'Furo (plantão sem médico)' }
 
-export default function EscalaDetalhe({ id, go }) {
+const aprov = (v) => (v === 'automatica' ? 'Automática' : 'Com aprovação')
+const presencaTxt = (p) => p.map((x) => (x === 'facial' ? 'Facial' : 'Geolocalização')).join(' + ') || '—'
+/** Campos de regra comparados para o log de alterações */
+const CAMPOS = [
+  ['Nome', (e) => e.nome],
+  ['Presença', (e) => presencaTxt(e.presenca)],
+  ['Raio da geolocalização', (e) => (e.presenca.includes('geo') ? `${e.raioGeo} m` : '—')],
+  ['Tolerância de atraso', (e) => `${e.toleranciaMin} min`],
+  ['Base de faturamento', (e) => BASES.find((b) => b.key === e.faturamento)?.label],
+  ['Base de pagamento', (e) => BASES.find((b) => b.key === e.pagamento)?.label],
+  ['Passagem de plantão', (e) => aprov(e.passagem)],
+  ['Troca de plantão', (e) => aprov(e.troca)],
+  ['Antecedência mínima', (e) => `${e.antecedenciaHoras} h`],
+  ['Anúncio automático', (e) => (e.anunciarVaga ? `Sim, ${e.anuncioHorasAntes}h antes` : 'Não')],
+  ['Pagamento antecipado', (e) => (e.pagAntecipado?.ativo ? `Sim, D+${e.pagAntecipado.prazoDias}, taxa ${e.pagAntecipado.taxa}%` : 'Não')],
+  [
+    'Pag. diferenciado antecipado',
+    (e) =>
+      e.pagDiferenciado?.ativo
+        ? `Sim, +${e.pagDiferenciado.tipo === 'percentual' ? e.pagDiferenciado.valor + '%' : brl(e.pagDiferenciado.valor)} em D+${e.pagDiferenciado.prazoDias}`
+        : 'Não',
+  ],
+  ['Início da vigência', (e) => fmtDate(e.vigenciaInicio)],
+  ['Fim da vigência', (e) => (e.vigenciaFim ? fmtDate(e.vigenciaFim) : 'Indeterminada')],
+]
+const diffRegras = (a, b) =>
+  CAMPOS.map(([campo, f]) => ({ campo, de: f(a), para: f(b) })).filter((x) => x.de !== x.para)
+
+export default function EscalaDetalhe({ id, semanaInicial, go }) {
   const { db, update, notify } = useStore()
   const escala = db.escalas.find((e) => e.id === id)
   const [tab, setTab] = useState('grade')
   const [semana, setSemana] = useState(() => {
+    if (semanaInicial) return startOfWeek(semanaInicial)
     const hoje = todayISO()
     const base = escala && hoje < escala.vigenciaInicio ? escala.vigenciaInicio : hoje
     return startOfWeek(base)
   })
   const [slotSel, setSlotSel] = useState(null)
   const [publicar, setPublicar] = useState(false)
+  const [draft, setDraft] = useState(null) // cópia local das regras em edição
 
   if (!escala)
     return (
@@ -55,16 +88,37 @@ export default function EscalaDetalhe({ id, go }) {
   const { cr, unidade, setor } = findSetor(db, escala.crId, escala.unidadeId, escala.setorId)
   const valores = setor?.valores
 
-  /** Edita a escala; se já publicada, marca alteração pendente de republicação */
+  /** Edita a escala no banco, registra no log e marca pendência se já publicada */
   const setE = (fn, log) =>
     update((d) => {
       const e = d.escalas.find((x) => x.id === id)
       fn(e)
       if (e.status === 'publicada') e.pendente = true
-      if (log) e.historico.push({ em: new Date().toISOString(), acao: log })
+      if (log) logEscala(e, log.tipo, log.acao, log.detalhes)
     })
 
+  const regras = draft || escala
+  const mudancas = draft ? diffRegras(escala, draft) : []
+  const editarRegras = (fn) =>
+    setDraft((prev) => {
+      const n = structuredClone(prev || escala)
+      fn(n)
+      return n
+    })
+  const salvarRegras = () => {
+    const det = diffRegras(escala, draft)
+    setE(
+      (e) => {
+        CAMPOS_CHAVE.forEach((k) => (e[k] = structuredClone(draft[k])))
+      },
+      { tipo: 'regra', acao: `Regras alteradas (${det.length} ${det.length > 1 ? 'campos' : 'campo'})`, detalhes: det },
+    )
+    setDraft(null)
+    notify('Alterações salvas e registradas no log')
+  }
+
   const dias = Array.from({ length: 7 }, (_, i) => addDays(semana, i))
+  const temAloc = (t) => escala.alocacoes.some((a) => a.turnoId === t.id && a.medicoId)
 
   return (
     <div className="page">
@@ -91,9 +145,7 @@ export default function EscalaDetalhe({ id, go }) {
 
       {escala.pendente && (
         <div className="alert warn row">
-          <span>
-            Há alterações feitas depois da publicação. Os médicos ainda veem a versão v{escala.versao}.
-          </span>
+          <span>Há alterações feitas depois da publicação. Os médicos ainda veem a versão v{escala.versao}.</span>
           <button className="btn sm" onClick={() => setPublicar(true)}>
             Republicar como v{escala.versao + 1}
           </button>
@@ -104,52 +156,85 @@ export default function EscalaDetalhe({ id, go }) {
         {TABS.map((t) => (
           <button key={t.key} className={tab === t.key ? 'on' : ''} onClick={() => setTab(t.key)}>
             {t.label}
+            {t.key === 'hist' && <span className="muted small"> ({escala.historico.length})</span>}
           </button>
         ))}
       </nav>
 
-      {tab === 'grade' && (
-        <Grade escala={escala} valores={valores} dias={dias} semana={semana} setSemana={setSemana} onSlot={setSlotSel} />
-      )}
+      {tab === 'grade' && <Grade escala={escala} valores={valores} dias={dias} semana={semana} setSemana={setSemana} onSlot={setSlotSel} />}
 
       {tab === 'config' && (
         <div className="stack">
           <div className="card">
-            <h2>Regras</h2>
-            <RegrasForm e={escala} set={(fn) => setE(fn)} />
+            <h2>Dias e períodos</h2>
+            <p className="muted small" style={{ marginBottom: 12 }}>
+              Cada período é salvo individualmente e registrado no log.
+            </p>
+            <TurnosEditor
+              turnos={escala.turnos}
+              valores={valores}
+              podeRemover={(t) => !temAloc(t)}
+              onSave={(t, anterior) => {
+                setE(
+                  (e) => {
+                    const i = e.turnos.findIndex((x) => x.id === t.id)
+                    if (i >= 0) e.turnos[i] = t
+                    else e.turnos.push(t)
+                    // se reduziu vagas, remove alocações das vagas que deixaram de existir
+                    e.alocacoes = e.alocacoes.filter((a) => a.turnoId !== t.id || a.vagaIdx < t.vagas)
+                  },
+                  anterior
+                    ? { tipo: 'periodo', acao: 'Período alterado', detalhes: [{ campo: 'Período', de: descTurno(anterior), para: descTurno(t) }] }
+                    : { tipo: 'periodo', acao: `Período adicionado: ${descTurno(t)}` },
+                )
+                notify(anterior ? 'Período alterado e salvo' : 'Período salvo')
+              }}
+              onRemove={(t) => {
+                setE(
+                  (e) => {
+                    e.turnos = e.turnos.filter((x) => x.id !== t.id)
+                    e.alocacoes = e.alocacoes.filter((a) => a.turnoId !== t.id)
+                  },
+                  { tipo: 'periodo', acao: `Período removido: ${descTurno(t)}` },
+                )
+                notify('Período removido', 'warn')
+              }}
+            />
           </div>
           <div className="card">
-            <h2>Dias e períodos</h2>
-            <TurnosEditor e={escala} set={(fn) => setE(fn)} valores={valores} travado />
+            <h2>Regras</h2>
+            <RegrasForm e={regras} set={editarRegras} />
           </div>
           <div className="card">
             <h2>Vigência</h2>
             <div className="grid-form">
               <Field label="Início da vigência">
-                <input type="date" value={escala.vigenciaInicio} onChange={(ev) => setE((x) => (x.vigenciaInicio = ev.target.value))} />
+                <input id="cfg-vig-ini" type="date" value={regras.vigenciaInicio} onChange={(ev) => editarRegras((x) => (x.vigenciaInicio = ev.target.value))} />
               </Field>
               <Field label="Fim da vigência (opcional)">
-                <input type="date" value={escala.vigenciaFim} min={escala.vigenciaInicio} onChange={(ev) => setE((x) => (x.vigenciaFim = ev.target.value))} />
+                <input id="cfg-vig-fim" type="date" value={regras.vigenciaFim} min={regras.vigenciaInicio} onChange={(ev) => editarRegras((x) => (x.vigenciaFim = ev.target.value))} />
               </Field>
             </div>
           </div>
+          {mudancas.length > 0 && (
+            <div className="save-bar">
+              <span className="muted">
+                {mudancas.length} {mudancas.length > 1 ? 'alterações não salvas' : 'alteração não salva'}
+              </span>
+              <button className="btn ghost" onClick={() => setDraft(null)}>
+                Descartar
+              </button>
+              <button className="btn primary" onClick={salvarRegras}>
+                Salvar alterações
+              </button>
+            </div>
+          )}
         </div>
       )}
 
       {tab === 'fin' && <Financeiro escala={escala} valores={valores} />}
 
-      {tab === 'hist' && (
-        <div className="card">
-          <ul className="timeline">
-            {[...escala.historico].reverse().map((h, i) => (
-              <li key={i}>
-                <span className="muted small">{new Date(h.em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</span>
-                <span>{h.acao}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {tab === 'hist' && <LogAlteracoes escala={escala} />}
 
       {slotSel && (
         <AlocarModal
@@ -158,7 +243,7 @@ export default function EscalaDetalhe({ id, go }) {
           slot={slotSel}
           onClose={() => setSlotSel(null)}
           onSave={(fn, log) => {
-            setE(fn, log)
+            setE(fn, { tipo: 'medico', acao: log })
             setSlotSel(null)
             notify(log)
           }}
@@ -174,14 +259,17 @@ export default function EscalaDetalhe({ id, go }) {
             update((d) => {
               const e = d.escalas.find((x) => x.id === id)
               const republicando = e.status === 'publicada'
+              const antes = e.publicadaAte
               if (republicando) e.versao += 1
               e.status = 'publicada'
               e.publicadaAte = ate
               e.pendente = false
-              e.historico.push({
-                em: new Date().toISOString(),
-                acao: `${republicando ? 'Republicada' : 'Publicada'} até ${fmtDate(ate)} (v${e.versao})${notificar ? ' — médicos notificados' : ''}`,
-              })
+              logEscala(
+                e,
+                'publicacao',
+                `${republicando ? 'Republicada' : 'Publicada'} até ${fmtDate(ate)} (v${e.versao})${notificar ? ' · médicos notificados' : ''}`,
+                republicando && antes !== ate ? [{ campo: 'Publicada até', de: fmtDate(antes), para: fmtDate(ate) }] : null,
+              )
             })
             setPublicar(false)
             notify(`Escala publicada até ${fmtDate(ate)}`)
@@ -191,7 +279,7 @@ export default function EscalaDetalhe({ id, go }) {
               const e = d.escalas.find((x) => x.id === id)
               e.status = 'rascunho'
               e.pendente = false
-              e.historico.push({ em: new Date().toISOString(), acao: 'Publicação suspensa — voltou para rascunho' })
+              logEscala(e, 'publicacao', 'Publicação suspensa · voltou para rascunho')
             })
             setPublicar(false)
             notify('Escala voltou para rascunho', 'warn')
@@ -199,6 +287,82 @@ export default function EscalaDetalhe({ id, go }) {
         />
       )}
     </div>
+  )
+}
+
+const CAMPOS_CHAVE = [
+  'nome',
+  'presenca',
+  'raioGeo',
+  'toleranciaMin',
+  'faturamento',
+  'pagamento',
+  'passagem',
+  'troca',
+  'antecedenciaHoras',
+  'anunciarVaga',
+  'anuncioHorasAntes',
+  'pagAntecipado',
+  'pagDiferenciado',
+  'vigenciaInicio',
+  'vigenciaFim',
+]
+
+/* ------------------------------------------------------------------ */
+
+function LogAlteracoes({ escala }) {
+  const [filtro, setFiltro] = useState('todos')
+  const tipoLabel = (k) => TIPOS_LOG.find((t) => t.key === k)?.label || 'Geral'
+  const tone = { regra: 'info', periodo: 'moon', medico: 'ok', publicacao: 'warn' }
+  const itens = [...escala.historico].reverse().filter((h) => filtro === 'todos' || h.tipo === filtro)
+  return (
+    <div className="card">
+      <div className="card-head">
+        <h2>Log de alterações</h2>
+        <div className="chips-filter">
+          {[{ key: 'todos', label: 'Todos' }, ...TIPOS_LOG].map((t) => (
+            <button key={t.key} className={filtro === t.key ? 'on' : ''} onClick={() => setFiltro(t.key)}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {itens.length === 0 && <p className="muted">Nenhum registro neste filtro.</p>}
+      <ul className="log-list">
+        {itens.map((h, i) => (
+          <li key={i}>
+            <div className="log-meta">
+              <span>{new Date(h.em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</span>
+              <b style={{ color: 'var(--text)' }}>{h.usuario || 'Sistema'}</b>
+              <span>
+                <Badge tone={tone[h.tipo] || 'neutral'}>{tipoLabel(h.tipo)}</Badge>
+              </span>
+            </div>
+            <div className="log-body">
+              <span>{h.acao}</span>
+              {h.detalhes?.length > 0 && (
+                <div className="log-diff">
+                  {h.detalhes.map((d, j) => (
+                    <FragmentDiff key={j} d={d} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function FragmentDiff({ d }) {
+  return (
+    <>
+      <span className="muted">{d.campo}</span>
+      <span>
+        <del>{d.de}</del> → <ins>{d.para}</ins>
+      </span>
+    </>
   )
 }
 
@@ -296,12 +460,16 @@ function Grade({ escala, valores, dias, semana, setSemana, onSlot }) {
                               {s.medicoId ? (
                                 <>
                                   <span className="slot-name">{nomeMed(s.medicoId).split(' ').slice(0, 2).join(' ')}</span>
-                                  <span className="slot-tag">{st === 'fixo' ? 'Fixo' : 'Avulso'}</span>
+                                  <span className="slot-tag">
+                                    {st === 'fixo' ? 'Fixo' : 'Avulso'}
+                                    {s.diferenciado && <span className="dif">Dif.</span>}
+                                  </span>
                                 </>
                               ) : (
                                 <>
-                                  <span className="slot-name">+ Inserir médico</span>
+                                  <span className="slot-name">{st === 'furo' ? 'Sem médico' : '+ Inserir médico'}</span>
                                   {st === 'anunciada' && <span className="slot-tag">Anunciada</span>}
+                                  {st === 'furo' && <span className="slot-tag">Furo</span>}
                                 </>
                               )}
                             </button>
@@ -332,8 +500,16 @@ function Grade({ escala, valores, dias, semana, setSemana, onSlot }) {
           </span>
         )}
         <span>
+          <i className="sw furo" /> Furo (horário passou sem médico)
+        </span>
+        <span>
           <i className="sw fds" /> Fim de semana/feriado
         </span>
+        {escala.pagDiferenciado?.ativo && (
+          <span>
+            <span className="dif" style={{ marginLeft: 0 }}>Dif.</span> Pagamento diferenciado antecipado
+          </span>
+        )}
       </div>
     </div>
   )
@@ -341,11 +517,14 @@ function Grade({ escala, valores, dias, semana, setSemana, onSlot }) {
 
 /* ------------------------------------------------------------------ */
 
-function AlocarModal({ db, escala, slot, onClose, onSave }) {
+export function AlocarModal({ db, escala, slot, onClose, onSave }) {
   const ocupado = !!slot.medicoId
   const [modo, setModo] = useState(ocupado ? 'ver' : 'inserir')
   const [medicoId, setMedicoId] = useState('')
-  const [fixo, setFixo] = useState('fixo')
+  const stInicial = statusSlot(escala, slot)
+  const urgente = stInicial === 'anunciada' || stInicial === 'furo'
+  const [fixo, setFixo] = useState(urgente ? 'avulso' : 'fixo')
+  const [dif, setDif] = useState(urgente && !!escala.pagDiferenciado?.ativo)
   const [q, setQ] = useState('')
   const med = db.medicos.find((m) => m.id === slot.medicoId)
   const { turno, data } = slot
@@ -376,6 +555,9 @@ function AlocarModal({ db, escala, slot, onClose, onSave }) {
   const lista = db.medicos.filter((m) => `${m.nome} ${m.especialidade} ${m.crm}`.toLowerCase().includes(q.toLowerCase()))
   const nome = (id) => db.medicos.find((m) => m.id === id)?.nome
 
+  const usaDif = dif && fixo === 'avulso' && !!escala.pagDiferenciado?.ativo
+  const pd = escala.pagDiferenciado
+  const pagComDif = pd?.ativo ? (pd.tipo === 'percentual' ? slot.pagBase * (1 + pd.valor / 100) : slot.pagBase + pd.valor) : slot.pagBase
   const salvar = () => {
     const mNome = nome(medicoId)
     if (fixo === 'fixo') {
@@ -394,8 +576,8 @@ function AlocarModal({ db, escala, slot, onClose, onSave }) {
     } else {
       onSave((e) => {
         e.alocacoes = e.alocacoes.filter((a) => !(!a.fixo && a.turnoId === turno.id && a.vagaIdx === slot.vagaIdx && a.data === data))
-        e.alocacoes.push({ id: uid('a'), turnoId: turno.id, vagaIdx: slot.vagaIdx, medicoId, fixo: false, data })
-      }, `${mNome} inserido(a) como AVULSO em ${fmtDate(data)} ${turno.inicio}`)
+        e.alocacoes.push({ id: uid('a'), turnoId: turno.id, vagaIdx: slot.vagaIdx, medicoId, fixo: false, data, ...(usaDif ? { diferenciado: true } : {}) })
+      }, `${mNome} inserido(a) como AVULSO em ${fmtDate(data)} ${turno.inicio}${usaDif ? ' com pagamento diferenciado antecipado' : ''}`)
     }
   }
 
@@ -521,6 +703,15 @@ function AlocarModal({ db, escala, slot, onClose, onSave }) {
             </p>
           </div>
 
+          {escala.pagDiferenciado?.ativo && fixo === 'avulso' && (
+            <label className="check dif-box">
+              <input id="chk-dif" type="checkbox" checked={dif} onChange={(e) => setDif(e.target.checked)} />
+              <span>
+                Aplicar <b>pagamento diferenciado antecipado</b>: paga {brl(pagComDif)} em vez de {brl(slot.pagBase)}, em D+{pd.prazoDias}
+                {urgente && <span className="muted small"> · recomendado para {stInicial === 'furo' ? 'cobertura de furo' : 'vaga anunciada'}</span>}
+              </span>
+            </label>
+          )}
           {fixo === 'fixo' && fixoAtual && fixoAtual.medicoId !== medicoId && (
             <div className="alert warn">
               Esta vaga tem <b>{nome(fixoAtual.medicoId)}</b> como fixo{slot.medicoId ? '' : ' (retirado apenas desta data)'}. Inserir
@@ -647,6 +838,7 @@ function Financeiro({ escala, valores }) {
 
   const linhas = useMemo(() => {
     const acc = Object.fromEntries(TIPOS_VALOR.map((t) => [t.key, { n: 0, ok: 0, fat: 0, pag: 0, fatPrev: 0, pagPrev: 0, horas: 0 }]))
+    acc._dif = { n: 0, extra: 0 }
     let d = de
     let g = 0
     while (d <= ate && g++ < 400) {
@@ -656,6 +848,10 @@ function Financeiro({ escala, valores }) {
         a.fatPrev += s.fat
         a.pagPrev += s.pag
         a.horas += s.turno.duracao
+        if (s.diferenciado) {
+          acc._dif.n++
+          acc._dif.extra += s.pag - s.pagBase
+        }
         if (s.medicoId) {
           a.ok++
           a.fat += s.fat
@@ -667,7 +863,8 @@ function Financeiro({ escala, valores }) {
     return acc
   }, [escala, valores, de, ate])
 
-  const tot = Object.values(linhas).reduce(
+  const dif = linhas._dif
+  const tot = TIPOS_VALOR.map((t) => linhas[t.key]).reduce(
     (t, l) => ({ n: t.n + l.n, ok: t.ok + l.ok, fat: t.fat + l.fat, pag: t.pag + l.pag, fatPrev: t.fatPrev + l.fatPrev, pagPrev: t.pagPrev + l.pagPrev, horas: t.horas + l.horas }),
     { n: 0, ok: 0, fat: 0, pag: 0, fatPrev: 0, pagPrev: 0, horas: 0 },
   )
@@ -755,6 +952,22 @@ function Financeiro({ escala, valores }) {
           Faturamento pelo <b>{baseLabel(escala.faturamento)}</b> e pagamento pelo <b>{baseLabel(escala.pagamento)}</b>. Este protótipo mostra
           apenas o planejado; o realizado virá do check-in/check-out ({escala.presenca.map((p) => (p === 'facial' ? 'facial' : 'geolocalização')).join(' + ')}) e o
           apurado da validação do gestor.
+        </p>
+        <p>
+          Pagamento antecipado:{' '}
+          <b>{escala.pagAntecipado?.ativo ? `permitido em D+${escala.pagAntecipado.prazoDias}, taxa de ${escala.pagAntecipado.taxa}%` : 'não permitido'}</b>.
+          Pagamento diferenciado antecipado:{' '}
+          <b>
+            {escala.pagDiferenciado?.ativo
+              ? `+${escala.pagDiferenciado.tipo === 'percentual' ? escala.pagDiferenciado.valor + '%' : brl(escala.pagDiferenciado.valor)} em D+${escala.pagDiferenciado.prazoDias}`
+              : 'não permitido'}
+          </b>
+          {dif.n > 0 && (
+            <>
+              {' '}· no período: <b>{dif.n}</b> plantão(ões) com diferenciado, custo extra de <b>{brl(dif.extra)}</b>
+            </>
+          )}
+          .
         </p>
       </div>
     </div>

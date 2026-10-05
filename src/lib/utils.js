@@ -95,3 +95,40 @@ export const BASES = [
   { key: 'apurado', label: 'Apurado', hint: 'realizado validado pelo gestor (glosas e ajustes)' },
 ]
 export const baseLabel = (k) => BASES.find((b) => b.key === k)?.label || k
+
+// Usuário logado (mock do protótipo)
+export const USUARIO = 'Rodrigo Gomes'
+
+export const TIPOS_LOG = [
+  { key: 'regra', label: 'Regras' },
+  { key: 'periodo', label: 'Períodos' },
+  { key: 'medico', label: 'Médicos' },
+  { key: 'publicacao', label: 'Publicação' },
+]
+
+/** Registra entrada no log da escala */
+export const logEscala = (e, tipo, acao, detalhes) => {
+  if (!e.historico) e.historico = []
+  e.historico.push({ em: new Date().toISOString(), usuario: USUARIO, tipo, acao, ...(detalhes?.length ? { detalhes } : {}) })
+}
+
+/** Data/hora absoluta de início de um plantão */
+export const inicioPlantao = (iso, inicio) => {
+  const d = parseISO(iso)
+  const [h, m] = inicio.split(':').map(Number)
+  d.setHours(h, m, 0, 0)
+  return d
+}
+
+export const descDias = (dias) => {
+  const s = [...dias].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7))
+  const key = s.join(',')
+  if (key === '1,2,3,4,5,6,0') return 'Todos os dias'
+  if (key === '1,2,3,4,5') return 'Seg a Sex'
+  if (key === '6,0') return 'Sáb e Dom'
+  return s.map((d) => DIAS[d]).join(', ')
+}
+
+/** Aplica pagamento diferenciado sobre o valor base de pagamento */
+export const valorDiferenciado = (pag, cfg) =>
+  !cfg?.ativo ? pag : cfg.tipo === 'percentual' ? pag * (1 + (cfg.valor || 0) / 100) : pag + (cfg.valor || 0)

@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { seed } from './seed'
 
-const KEY = 'soudoc-escalas-v1'
+const KEY = 'soudoc-escalas-v2'
 const Ctx = createContext(null)
 
 const load = () => {
