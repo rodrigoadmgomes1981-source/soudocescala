@@ -1,29 +1,42 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../../lib/store'
-import { Badge, Empty } from '../../components/ui'
+import { Badge, Empty, EscalaFiltro, JanelaTempo, resolverJanela } from '../../components/ui'
 import MedicoAcoesModal from '../../components/MedicoAcoes'
 import { DIAS, addDays, brl, fimTurno, todayISO, weekday, parseISO } from '../../lib/utils'
 import { enderecoTxt, ESTADO_PRES } from '../../lib/presenca'
 import { plantoesDoMedico } from '../../lib/medico'
 import { TIPOS_SOL } from '../../lib/solicitacoes'
 
+const EXTRAS = [
+  { key: '7d', h: 168, label: '7 dias' },
+  { key: '15d', h: 360, label: '15 dias' },
+  { key: '30d', h: 720, label: '30 dias' },
+]
 const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
 
 export default function Agenda() {
   const { db, user } = useStore()
   const me = user.medicoId
   const hoje = todayISO()
-  const [dias, setDias] = useState(15)
+  const [janela, setJanela] = useState({ modo: '15d', de: todayISO(), ate: addDays(todayISO(), 30) })
+  const minhasEscalas = db.escalas.filter((e) => e.status === 'publicada' && e.alocacoes.some((a) => a.medicoId === user.medicoId))
+  const [escalaIds, setEscalaIds] = useState([])
+  const filtroEsc = (p) => escalaIds.length === 0 || escalaIds.includes(p.escala.id)
   const [sel, setSel] = useState(null)
   const agora = Date.now()
+  const jan = resolverJanela(janela, EXTRAS)
 
-  const proximos = useMemo(() => plantoesDoMedico(db, me, hoje, addDays(hoje, dias)).filter((p) => p.fim > agora), [db, me, hoje, dias, agora])
+  const proximos = useMemo(
+    () => plantoesDoMedico(db, me, jan.de, jan.ate).filter((p) => p.fim > agora && p.ini <= jan.fim && p.fim >= jan.ini && filtroEsc(p)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [db, me, jan.de, jan.ate, jan.ini, jan.fim, escalaIds, agora],
+  )
   const recentes = useMemo(
     () =>
       plantoesDoMedico(db, me, addDays(hoje, -7), hoje)
-        .filter((p) => p.fim <= agora)
+        .filter((p) => p.fim <= agora && filtroEsc(p))
         .reverse(),
-    [db, me, hoje, agora],
+    [db, me, hoje, agora, escalaIds],
   )
   const pendSol = (db.solicitacoes || []).filter((s) => s.medicoId === me && s.status === 'pendente')
   const horas = proximos.reduce((t, p) => t + p.turno.duracao, 0)
@@ -40,14 +53,12 @@ export default function Agenda() {
           <h1>Olá, Dr(a). {user.nome.split(' ')[0]}</h1>
           <p className="muted">Seus plantões confirmados nas escalas publicadas.</p>
         </div>
-        <div className="chips-filter">
-          {[7, 15, 30].map((d) => (
-            <button key={d} className={dias === d ? 'on' : ''} onClick={() => setDias(d)}>
-              Próximos {d} dias
-            </button>
-          ))}
-        </div>
       </header>
+
+      <div className="card filtro-card filter-bar">
+        <JanelaTempo value={janela} onChange={setJanela} extras={EXTRAS} />
+        <EscalaFiltro escalas={minhasEscalas} value={escalaIds} onChange={setEscalaIds} label="Escalas" />
+      </div>
 
       <div className="kpi-row">
         <div className="kpi">
@@ -58,12 +69,12 @@ export default function Agenda() {
         <div className="kpi">
           <span className="muted small">Plantões no período</span>
           <b>{proximos.length}</b>
-          <small className="muted">próximos {dias} dias</small>
+          <small className="muted">{jan.label.toLowerCase()}</small>
         </div>
         <div className="kpi">
           <span className="muted small">Horas planejadas</span>
           <b>{horas}h</b>
-          <small className="muted">próximos {dias} dias</small>
+          <small className="muted">{jan.label.toLowerCase()}</small>
         </div>
         <div className="kpi">
           <span className="muted small">Valor previsto</span>

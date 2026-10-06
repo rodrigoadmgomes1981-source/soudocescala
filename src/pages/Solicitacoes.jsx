@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useStore } from '../lib/store'
-import { Badge, Empty } from '../components/ui'
+import { Badge, Empty, EscalaFiltro } from '../components/ui'
 import { TIPOS_SOL, aplicarSolicitacao, descPlantao } from '../lib/solicitacoes'
 import { logEscala } from '../lib/utils'
 
@@ -10,7 +10,11 @@ export default function Solicitacoes() {
   const { db, update, notify, user } = useStore()
   const [filtro, setFiltro] = useState('pendente')
   const nome = (id) => db.medicos.find((m) => m.id === id)?.nome || '—'
-  const lista = [...(db.solicitacoes || [])].reverse().filter((s) => filtro === 'todas' || s.status === filtro)
+  const [escalaIds, setEscalaIds] = useState([])
+  const escalas = db.escalas.filter((e) => !e.incompleta)
+  const lista = [...(db.solicitacoes || [])]
+    .reverse()
+    .filter((s) => (filtro === 'todas' || s.status === filtro) && (escalaIds.length === 0 || escalaIds.includes(s.escalaId)))
 
   const decidir = (sol, aprovar) => {
     const esc = db.escalas.find((e) => e.id === sol.escalaId)
@@ -39,6 +43,9 @@ export default function Solicitacoes() {
           <p className="muted">Passagens e trocas em escalas configuradas com aprovação. As automáticas aparecem como aprovadas.</p>
         </div>
       </header>
+      <div className="card filtro-card filter-bar">
+        <EscalaFiltro escalas={escalas} value={escalaIds} onChange={setEscalaIds} label="Escalas" />
+      </div>
       <div className="chips-filter">
         {[
           ['pendente', 'Pendentes'],

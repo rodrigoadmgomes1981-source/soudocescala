@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../lib/store'
-import { Badge, Empty, EscalaFiltro, Field } from '../components/ui'
+import { Badge, Empty, EscalaFiltro, JanelaTempo, resolverJanela } from '../components/ui'
 import { AlocarModal } from './EscalaDetalhe'
 import { DIAS, addDays, brl, fimTurno, fmtDate, inicioPlantao, logEscala, todayISO, valorDiferenciado, weekday } from '../lib/utils'
 import { momentoAnuncio, slotsGlobais, statusSlot } from '../lib/escala'
@@ -13,17 +13,23 @@ const fmtHoras = (ms) => {
 }
 const fmtQuando = (d) => d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 
+const EXTRAS = [
+  { key: '7d', h: 168, label: '7 dias' },
+  { key: '15d', h: 360, label: '15 dias' },
+]
+
 export default function VagasAnunciadas({ go }) {
   const { db, update, notify } = useStore()
-  const [horizonte, setHorizonte] = useState(15)
   const [escalaIds, setEscalaIds] = useState([])
   const [sel, setSel] = useState(null)
   const hoje = todayISO()
+  const [janela, setJanela] = useState({ modo: '72', de: hoje, ate: addDays(hoje, 15) })
   const agora = Date.now()
+  const jan = resolverJanela(janela, EXTRAS)
 
   const itens = useMemo(() => {
-    return slotsGlobais(db, hoje, addDays(hoje, horizonte), (e) => e.status === 'publicada' && (escalaIds.length === 0 || escalaIds.includes(e.id)))
-      .filter((s) => (!s.medicoId || s.aloc?.ofertado) && s.data <= s.escala.publicadaAte && inicioPlantao(s.data, s.turno.inicio).getTime() > agora)
+    return slotsGlobais(db, jan.de, jan.ate, (e) => e.status === 'publicada' && (escalaIds.length === 0 || escalaIds.includes(e.id)))
+      .filter((s) => (!s.medicoId || s.aloc?.ofertado) && s.data <= s.escala.publicadaAte && inicioPlantao(s.data, s.turno.inicio).getTime() > agora && inicioPlantao(s.data, s.turno.inicio).getTime() >= jan.ini && inicioPlantao(s.data, s.turno.inicio).getTime() <= jan.fim)
       .map((s) => {
         const st = statusSlot(s.escala, s)
         const anuncio = momentoAnuncio(s.escala, s)
@@ -38,7 +44,7 @@ export default function VagasAnunciadas({ go }) {
         }
       })
       .sort((a, b) => a.ate - b.ate)
-  }, [db, hoje, horizonte, escalaIds, agora])
+  }, [db, jan.de, jan.ate, jan.ini, jan.fim, escalaIds, agora])
 
   const anunciadas = itens.filter((i) => i.st === 'anunciada')
   const aguardando = itens.filter((i) => i.st === 'aguardando')
@@ -64,19 +70,11 @@ export default function VagasAnunciadas({ go }) {
           <h1>Vagas anunciadas</h1>
           <p className="muted">Vagas sem médico em escalas publicadas, do momento do anúncio automático até o início do plantão.</p>
         </div>
-        <div className="filters">
-          <Field label="Próximos">
-            <select id="va-horizonte" value={horizonte} onChange={(e) => setHorizonte(Number(e.target.value))}>
-              <option value={7}>7 dias</option>
-              <option value={15}>15 dias</option>
-              <option value={30}>30 dias</option>
-            </select>
-          </Field>
-        </div>
       </header>
 
-      <div className="card filtro-card">
-        <EscalaFiltro escalas={publicadas} value={escalaIds} onChange={setEscalaIds} label="Filtrar por escala" />
+      <div className="card filtro-card filter-bar">
+        <JanelaTempo value={janela} onChange={setJanela} extras={EXTRAS} />
+        <EscalaFiltro escalas={publicadas} value={escalaIds} onChange={setEscalaIds} label="Escalas" />
       </div>
 
       <div className="kpi-row">
@@ -103,7 +101,7 @@ export default function VagasAnunciadas({ go }) {
       </div>
 
       {itens.length === 0 ? (
-        <Empty title="Nenhuma vaga aberta no período">Todas as vagas das escalas publicadas estão preenchidas.</Empty>
+        <Empty title="Nenhuma vaga aberta neste cenário">Nenhuma vaga sem médico começa dentro da janela escolhida. Amplie o cenário ou o filtro de escalas.</Empty>
       ) : (
         <>
           <div className="card">

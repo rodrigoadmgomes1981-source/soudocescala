@@ -14,6 +14,8 @@ import {
   fimTurno,
   fmtDate,
   fmtDateShort,
+  descDias,
+  inicioPlantao,
   logEscala,
   parseISO,
   startOfWeek,
@@ -27,6 +29,7 @@ import { ESTADO_PRES, presencaDe } from '../lib/presenca'
 import { PresencaPainel } from '../components/Presenca'
 import ApuracaoTabela from '../components/Apuracao'
 import MedicoAcoesModal from '../components/MedicoAcoes'
+import { explicarConflitos } from '../lib/solicitacoes'
 import { can, podeDestravar } from '../lib/perms'
 
 const TABS = [
@@ -698,17 +701,22 @@ export function AlocarModal({ db, escala, slot, unidade, podeAlocar = true, pode
   const [q, setQ] = useState('')
   const med = db.medicos.find((m) => m.id === slot.medicoId)
   const { turno, data } = slot
-  const diasTurno = turno.dias.slice().sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((d) => DIAS[d]).join(', ')
 
-  // checagem de conflito: avulso só na data; fixo nas próximas 8 ocorrências
+  const diaClicado = weekday(data)
+  const [diasFixo, setDiasFixo] = useState([diaClicado])
+  const [confirmar, setConfirmar] = useState(false)
+  const diasOrdenados = (arr) => [...arr].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7))
+  const diasDisponiveis = diasOrdenados(turno.dias)
+
+  // checagem de conflito: avulso só na data; fixo nas próximas 8 ocorrências dos dias escolhidos
   const checagem = useMemo(() => {
     if (!medicoId) return null
     const datas = [data]
     if (fixo === 'fixo') {
       let d = addDays(data, 1)
       let guard = 0
-      while (datas.length < 8 && guard++ < 60) {
-        if (turno.dias.includes(weekday(d)) && naVigencia(escala, d)) datas.push(d)
+      while (datas.length < 8 && guard++ < 70) {
+        if (diasFixo.includes(weekday(d)) && turno.dias.includes(weekday(d)) && naVigencia(escala, d)) datas.push(d)
         d = addDays(d, 1)
       }
     }
@@ -716,11 +724,17 @@ export function AlocarModal({ db, escala, slot, unidade, podeAlocar = true, pode
     let maxH = 0
     for (const d of datas) {
       const r = checarMedico(db, medicoId, d, turno, d === data ? slot.key : `${turno.id}-${slot.vagaIdx}-${d}`)
-      conflitos.push(...r.conflitos)
+      for (const c of r.conflitos) if (!conflitos.some((x) => x.txt === c.txt)) conflitos.push(c)
       maxH = Math.max(maxH, r.horasContinuas)
     }
-    return { conflitos: [...new Set(conflitos)], maxH, datas: datas.length }
-  }, [medicoId, fixo, data, turno, db, escala, slot])
+    const novos = datas.map((d) => {
+      const ini = inicioPlantao(d, turno.inicio).getTime()
+      return [ini, ini + turno.duracao * 3600e3]
+    })
+    const exp = explicarConflitos(db, medicoId, conflitos, novos)
+    return { conflitos, maxH, datas: datas.length, ...exp }
+  }, [medicoId, fixo, diasFixo, data, turno, db, escala, slot])
+  const temConflito = !!checagem && checagem.conflitos.length > 0
 
   const lista = db.medicos.filter((m) => `${m.nome} ${m.especialidade} ${m.crm}`.toLowerCase().includes(q.toLowerCase()))
   const nome = (id) => db.medicos.find((m) => m.id === id)?.nome
@@ -729,25 +743,41 @@ export function AlocarModal({ db, escala, slot, unidade, podeAlocar = true, pode
   const pd = escala.pagDiferenciado
   const pagComDif = pd?.ativo ? (pd.tipo === 'percentual' ? slot.pagBase * (1 + pd.valor / 100) : slot.pagBase + pd.valor) : slot.pagBase
   const salvar = () => {
+    if (temConflito && !confirmar) {
+      setConfirmar(true)
+      return
+    }
     const mNome = nome(medicoId)
+    const confirmTxt = temConflito
+      ? ` · conflito de escala confirmado (${checagem.conflitos.map((c) => c.txt).join('; ')})${checagem.porPendencia.length ? ' — pendente de aprovação de passagem/troca' : ''}`
+      : ''
     if (fixo === 'fixo') {
       onSave((e) => {
-        // encerra fixo anterior desse slot e remove avulsas futuras vazias/de liberação
+        // fixos anteriores desta vaga nos mesmos dias da semana: encerra a partir de `data`, preservando os demais dias
+        const novos = []
         e.alocacoes.forEach((a) => {
-          if (a.fixo && a.turnoId === turno.id && a.vagaIdx === slot.vagaIdx && a.desde <= data && (!a.ate || a.ate >= data)) {
-            if (a.desde === data) a._del = true
-            else a.ate = addDays(data, -1)
+          if (!a.fixo || a.turnoId !== turno.id || a.vagaIdx !== slot.vagaIdx || (a.ate && a.ate < data)) return
+          const diasA = a.dias || turno.dias
+          if (!diasA.some((d) => diasFixo.includes(d))) return
+          const restantes = diasA.filter((d) => !diasFixo.includes(d))
+          if (a.desde >= data) {
+            if (restantes.length) a.dias = restantes
+            else a._del = true
+          } else {
+            const ateOrig = a.ate
+            a.ate = addDays(data, -1)
+            if (restantes.length) novos.push({ ...a, id: uid('a'), desde: data, ate: ateOrig, dias: restantes })
           }
-          if (!a.fixo && a.turnoId === turno.id && a.vagaIdx === slot.vagaIdx && a.data === data) a._del = true
         })
-        e.alocacoes = e.alocacoes.filter((a) => !a._del)
-        e.alocacoes.push({ id: uid('a'), turnoId: turno.id, vagaIdx: slot.vagaIdx, medicoId, fixo: true, desde: data })
-      }, `${mNome} inserido(a) como FIXO em ${diasTurno} ${turno.inicio}, a partir de ${fmtDate(data)}`)
+        e.alocacoes = e.alocacoes.filter((a) => !a._del && !(!a.fixo && a.turnoId === turno.id && a.vagaIdx === slot.vagaIdx && a.data === data))
+        e.alocacoes.push(...novos.map(({ _del, ...x }) => x))
+        e.alocacoes.push({ id: uid('a'), turnoId: turno.id, vagaIdx: slot.vagaIdx, medicoId, fixo: true, desde: data, dias: diasOrdenados(diasFixo) })
+      }, `${mNome} inserido(a) como FIXO em ${descDias(diasFixo)} ${turno.inicio}, a partir de ${fmtDate(data)}${confirmTxt}`)
     } else {
       onSave((e) => {
         e.alocacoes = e.alocacoes.filter((a) => !(!a.fixo && a.turnoId === turno.id && a.vagaIdx === slot.vagaIdx && a.data === data))
         e.alocacoes.push({ id: uid('a'), turnoId: turno.id, vagaIdx: slot.vagaIdx, medicoId, fixo: false, data, ...(usaDif ? { diferenciado: true } : {}) })
-      }, `${mNome} inserido(a) como AVULSO em ${fmtDate(data)} ${turno.inicio}${usaDif ? ' com pagamento diferenciado antecipado' : ''}`)
+      }, `${mNome} inserido(a) como AVULSO em ${fmtDate(data)} ${turno.inicio}${usaDif ? ' com pagamento diferenciado antecipado' : ''}${confirmTxt}`)
     }
   }
 
@@ -764,12 +794,21 @@ export function AlocarModal({ db, escala, slot, unidade, podeAlocar = true, pode
       else a.ate = addDays(data, -1)
     }, `Fixo de ${med?.nome} encerrado a partir de ${fmtDate(data)}`)
 
-  const fixoAtual = escala.alocacoes.find(
-    (a) => a.fixo && a.medicoId && a.turnoId === turno.id && a.vagaIdx === slot.vagaIdx && a.desde <= data && (!a.ate || a.ate >= data),
-  )
   const pres = slot.medicoId ? presencaDe(escala, slot, unidade, med?.nome) : null
   const ctxTxt = `${DIAS[weekday(data)]} ${fmtDate(data)} ${turno.inicio}–${fimTurno(turno.inicio, turno.duracao)} · ${escala.nome}`
-  const bloqueado = !medicoId || (checagem && checagem.conflitos.length > 0)
+  const bloqueado = !medicoId || (fixo === 'fixo' && diasFixo.length === 0)
+  const fixoSobreposto =
+    fixo === 'fixo' &&
+    escala.alocacoes.filter(
+      (a) =>
+        a.fixo &&
+        a.medicoId &&
+        a.medicoId !== medicoId &&
+        a.turnoId === turno.id &&
+        a.vagaIdx === slot.vagaIdx &&
+        (!a.ate || a.ate >= data) &&
+        (a.dias || turno.dias).some((d) => diasFixo.includes(d)),
+    )
 
   return (
     <Modal
@@ -809,9 +848,20 @@ export function AlocarModal({ db, escala, slot, unidade, podeAlocar = true, pode
               Cancelar
             </button>
             <div className="spacer" />
-            <button className="btn primary" disabled={bloqueado} onClick={salvar}>
-              Inserir médico
-            </button>
+            {confirmar ? (
+              <>
+                <button className="btn ghost" onClick={() => setConfirmar(false)}>
+                  Não, voltar
+                </button>
+                <button className="btn primary danger-bg" onClick={salvar}>
+                  Sim, prosseguir
+                </button>
+              </>
+            ) : (
+              <button className="btn primary" disabled={bloqueado} onClick={salvar}>
+                Inserir médico
+              </button>
+            )}
           </>
         )
       }
@@ -868,7 +918,7 @@ export function AlocarModal({ db, escala, slot, unidade, podeAlocar = true, pode
             </span>
             <span className="small">
               {slot.aloc?.fixo
-                ? `Fixo desde ${fmtDate(slot.aloc.desde)}${slot.aloc.ate ? ` até ${fmtDate(slot.aloc.ate)}` : ''} · ${diasTurno}`
+                ? `Fixo desde ${fmtDate(slot.aloc.desde)}${slot.aloc.ate ? ` até ${fmtDate(slot.aloc.ate)}` : ''} · ${descDias(slot.aloc.dias || turno.dias)}`
                 : 'Avulso — somente nesta data'}
             </span>
           </div>
@@ -880,7 +930,10 @@ export function AlocarModal({ db, escala, slot, unidade, podeAlocar = true, pode
           <input className="search full" placeholder="Buscar médico por nome, CRM ou especialidade…" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
           <div className="med-list" role="listbox">
             {lista.map((m) => (
-              <button key={m.id} role="option" aria-selected={medicoId === m.id} className={medicoId === m.id ? 'on' : ''} onClick={() => setMedicoId(m.id)}>
+              <button key={m.id} role="option" aria-selected={medicoId === m.id} className={medicoId === m.id ? 'on' : ''} onClick={() => {
+                  setMedicoId(m.id)
+                  setConfirmar(false)
+                }}>
                 <b>{m.nome}</b>
                 <span className="muted small">
                   {m.crm} · {m.especialidade}
@@ -894,15 +947,59 @@ export function AlocarModal({ db, escala, slot, unidade, podeAlocar = true, pode
             <Segmented
               name="Tipo de alocação"
               value={fixo}
-              onChange={setFixo}
+              onChange={(v) => {
+                setFixo(v)
+                setConfirmar(false)
+              }}
               options={[
                 { key: 'fixo', label: 'Sim, fixo' },
                 { key: 'avulso', label: 'Não, só nesta data' },
               ]}
             />
+            {fixo === 'fixo' && (
+              <div className="fixo-dias">
+                <span className="field-label">Em quais dias da semana ele ficará fixo?</span>
+                <div className="days">
+                  {[1, 2, 3, 4, 5, 6, 0].map((d) => {
+                    const disp = turno.dias.includes(d)
+                    const obrig = d === diaClicado
+                    return (
+                      <button
+                        type="button"
+                        key={d}
+                        disabled={!disp || obrig}
+                        aria-pressed={diasFixo.includes(d)}
+                        className={diasFixo.includes(d) ? 'on' : ''}
+                        title={!disp ? 'Este período não acontece neste dia' : obrig ? 'Dia do plantão selecionado' : ''}
+                        onClick={() => {
+                          setConfirmar(false)
+                          setDiasFixo((x) => (x.includes(d) ? x.filter((y) => y !== d) : [...x, d]))
+                        }}
+                      >
+                        {DIAS[d]}
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="atalhos">
+                  <button type="button" className="link small" onClick={() => setDiasFixo(diasDisponiveis)}>
+                    Todos os dias do período
+                  </button>
+                  <button type="button" className="link small" onClick={() => setDiasFixo([...new Set([diaClicado, ...[1, 2, 3, 4, 5].filter((d) => turno.dias.includes(d))])])}>
+                    Seg a Sex
+                  </button>
+                  <button type="button" className="link small" onClick={() => setDiasFixo([...new Set([diaClicado, ...[6, 0].filter((d) => turno.dias.includes(d))])])}>
+                    Sáb e Dom
+                  </button>
+                  <button type="button" className="link small" onClick={() => setDiasFixo([diaClicado])}>
+                    Só {DIAS[diaClicado]}
+                  </button>
+                </div>
+              </div>
+            )}
             <p className="muted small" style={{ marginTop: 6 }}>
               {fixo === 'fixo'
-                ? `Repete em toda ${diasTurno} às ${turno.inicio}, a partir de ${fmtDate(data)}${escala.vigenciaFim ? ` até ${fmtDate(escala.vigenciaFim)}` : ' (vigência indeterminada)'}.`
+                ? `Repete toda(o) ${descDias(diasFixo)} às ${turno.inicio}, a partir de ${fmtDate(data)}${escala.vigenciaFim ? ` até ${fmtDate(escala.vigenciaFim)}` : ' (vigência indeterminada)'}.`
                 : `Vale apenas para ${fmtDate(data)}.`}
             </p>
           </div>
@@ -916,29 +1013,59 @@ export function AlocarModal({ db, escala, slot, unidade, podeAlocar = true, pode
               </span>
             </label>
           )}
-          {fixo === 'fixo' && fixoAtual && fixoAtual.medicoId !== medicoId && (
+          {fixoSobreposto && fixoSobreposto.length > 0 && medicoId && (
             <div className="alert warn">
-              Esta vaga tem <b>{nome(fixoAtual.medicoId)}</b> como fixo{slot.medicoId ? '' : ' (retirado apenas desta data)'}. Inserir
-              outro médico como fixo <b>encerra o fixo de {nome(fixoAtual.medicoId)?.split(' ')[0]}</b> a partir de {fmtDate(data)}. Para cobrir só este dia,
-              escolha “Não, só nesta data”.
+              {fixoSobreposto.map((a) => (
+                <div key={a.id}>
+                  <b>{nome(a.medicoId)}</b> é fixo nesta vaga em {descDias((a.dias || turno.dias).filter((d) => diasFixo.includes(d)))}. Esses dias passam
+                  para o novo médico a partir de {fmtDate(data)}
+                  {(a.dias || turno.dias).some((d) => !diasFixo.includes(d))
+                    ? `; ${nome(a.medicoId)?.split(' ')[0]} continua fixo em ${descDias((a.dias || turno.dias).filter((d) => !diasFixo.includes(d)))}.`
+                    : '.'}
+                </div>
+              ))}
             </div>
           )}
-          {checagem && checagem.conflitos.length > 0 && (
+          {temConflito && (
             <div className="alert danger">
-              <b>Conflito de horário</b> — o médico já está escalado em:
+              <b>Conflito de escala</b>: o profissional já está escalado no mesmo horário em:
               <ul>
-                {checagem.conflitos.slice(0, 5).map((c) => (
-                  <li key={c}>{c}</li>
+                {checagem.porPendencia.map((c) => (
+                  <li key={c.txt}>
+                    {c.txt}
+                    <div className="small">
+                      O conflito ocorre porque <b>{c.motivo}</b>. Se for aprovada, o conflito deixa de existir.
+                    </div>
+                  </li>
+                ))}
+                {checagem.semPendencia.slice(0, 5).map((c) => (
+                  <li key={c.txt}>{c.txt}</li>
                 ))}
               </ul>
             </div>
           )}
-          {checagem && checagem.conflitos.length === 0 && checagem.maxH > 24 && (
+          {checagem && checagem.entrando.length > 0 && (
+            <div className="alert warn">
+              Atenção: existe pedido pendente que colocaria este profissional no mesmo horário —{' '}
+              {checagem.entrando.map((x) => x.motivo).join('; ')}. Se for aprovado, haverá conflito.
+            </div>
+          )}
+          {confirmar && (
+            <div className="confirm-box" role="alertdialog" aria-label="Confirmar conflito">
+              <b>Profissional com conflito de escala. Deseja prosseguir?</b>
+              <span className="small">
+                {checagem.porPendencia.length && !checagem.semPendencia.length
+                  ? 'O conflito depende de passagem/troca ainda não aprovada. Ao prosseguir, a alocação fica registrada no log com o conflito.'
+                  : 'Ao prosseguir, o profissional ficará em dois locais no mesmo horário. A decisão fica registrada no log.'}
+              </span>
+            </div>
+          )}
+          {checagem && !temConflito && checagem.maxH > 24 && (
             <div className="alert warn">
               Atenção: com esta alocação o médico fica <b>{checagem.maxH}h seguidas</b> em plantão (limite de referência: 24h).
             </div>
           )}
-          {checagem && checagem.conflitos.length === 0 && checagem.maxH <= 24 && (
+          {checagem && !temConflito && checagem.entrando.length === 0 && checagem.maxH <= 24 && (
             <div className="alert ok">Sem conflitos{fixo === 'fixo' ? ` nas próximas ${checagem.datas} ocorrências` : ''}.</div>
           )}
         </div>

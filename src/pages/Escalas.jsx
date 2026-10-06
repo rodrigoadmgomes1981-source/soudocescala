@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { useStore } from '../lib/store'
-import { Badge, Empty } from '../components/ui'
+import { Badge, Empty, EscalaFiltro } from '../components/ui'
 import { addDays, baseLabel, brl, fmtDate, startOfWeek, todayISO } from '../lib/utils'
 import { findSetor, resumoPeriodo } from '../lib/escala'
 import { can } from '../lib/perms'
@@ -11,9 +12,11 @@ export default function Escalas({ go }) {
   const ehMedico = user?.perfil === 'medico'
   const podeCriar = can(user, 'escalas.editar')
   const verValores = can(user, 'financeiro.ver')
-  const escalas = db.escalas.filter((e) =>
+  const [escalaIds, setEscalaIds] = useState([])
+  const disponiveis = db.escalas.filter((e) =>
     ehMedico ? e.status === 'publicada' && e.alocacoes.some((a) => a.medicoId === user.medicoId) : podeCriar || !e.incompleta,
   )
+  const escalas = disponiveis.filter((e) => escalaIds.length === 0 || escalaIds.includes(e.id))
 
   return (
     <div className="page">
@@ -31,6 +34,12 @@ export default function Escalas({ go }) {
           </button>
         )}
       </header>
+
+      {disponiveis.length > 1 && (
+        <div className="card filtro-card">
+          <EscalaFiltro escalas={disponiveis} value={escalaIds} onChange={setEscalaIds} label="Escalas" />
+        </div>
+      )}
 
       {escalas.length === 0 && (
         <Empty

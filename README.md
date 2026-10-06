@@ -45,6 +45,12 @@ Os dados ficam no `localStorage` do navegador (não há backend ainda). O botão
 - **Médico**: agenda, horas planejadas × executadas, valores (acumulado até hoje e a receber), antecipação de plantões apurados (validação do faturamento), passar/trocar/anunciar plantão conforme a regra da escala.
 - **Solicitações** (escalista aprova passagem/troca) e **Antecipações** (faturamento aprova/recusa).
 
+### Novidades da v4
+- **Fixo por dia da semana**: ao escolher “Sim, fixo”, marca-se em quais dias (Seg…Dom) o médico fica fixo; o fixo anterior da vaga é dividido automaticamente.
+- **Cenários 24h / 48h / 72h** (além de dias e Personalizado) em Vagas anunciadas, Furos de escala e Agenda do médico.
+- **Filtro de várias escalas** (lista suspensa com caixas de seleção) em Escalas, Vagas, Furos, Apuração, Solicitações, Antecipações e telas do médico.
+- **Conflito de escala**: se o conflito existe porque uma passagem/troca ainda não foi aprovada, o sistema explica; em qualquer conflito pede confirmação (“Profissional com conflito de escala, deseja prosseguir?”) e registra no log.
+
 ## Rodar local
 
 ```bash

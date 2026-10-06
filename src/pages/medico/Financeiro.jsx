@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../../lib/store'
-import { Badge, Empty } from '../../components/ui'
+import { Badge, Empty, EscalaFiltro } from '../../components/ui'
 import { DIAS, addDays, brl, fmtDate, todayISO, uid, weekday } from '../../lib/utils'
 import { FIN_LABEL, plantoesDoMedico } from '../../lib/medico'
 
@@ -12,8 +12,15 @@ export default function FinanceiroMedico() {
   const hoje = todayISO()
   const [sel, setSel] = useState(() => new Set())
   const [extratoTodo, setExtratoTodo] = useState(false)
+  const minhasEscalas = db.escalas.filter((e) => e.status === 'publicada' && e.alocacoes.some((a) => a.medicoId === user.medicoId))
+  const [escalaIds, setEscalaIds] = useState([])
+  const filtroEsc = (p) => escalaIds.length === 0 || escalaIds.includes(p.escala.id)
   // histórico desde o início das vigências + 60 dias à frente
-  const ps = useMemo(() => plantoesDoMedico(db, me, '2026-08-01', addDays(hoje, 60)), [db, me, hoje])
+  const ps = useMemo(
+    () => plantoesDoMedico(db, me, '2026-08-01', addDays(hoje, 60)).filter(filtroEsc),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [db, me, hoje, escalaIds],
+  )
 
   const passados = ps.filter((p) => ['apurado', 'aguardando', 'glosado'].includes(p.fin.status))
   const apurado = passados.filter((p) => p.fin.status === 'apurado').reduce((t, p) => t + p.fin.valor, 0)
@@ -79,6 +86,10 @@ export default function FinanceiroMedico() {
           <p className="muted">Posição em {fmtDate(hoje)}. Valores de plantões ainda não apurados são estimados pela presença registrada.</p>
         </div>
       </header>
+
+      <div className="card filtro-card">
+        <EscalaFiltro escalas={minhasEscalas} value={escalaIds} onChange={setEscalaIds} label="Escalas" />
+      </div>
 
       <div className="kpi-row">
         <div className="kpi">

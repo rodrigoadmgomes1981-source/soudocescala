@@ -48,3 +48,51 @@ export const bloqueioSolicitacao = (escala, slot) => {
     return `Fora do prazo: a escala exige ${escala.antecedenciaHoras}h de antecedência (faltam ${Math.floor(horas)}h).`
   return null
 }
+
+const intervalo = (e, turnoId, data) => {
+  const t = e?.turnos.find((x) => x.id === turnoId)
+  if (!t) return null
+  const ini = inicioPlantao(data, t.inicio).getTime()
+  return [ini, ini + t.duracao * 3600e3]
+}
+
+/**
+ * Explica conflitos de escala de um médico considerando passagens/trocas pendentes.
+ * - saindo: o conflito existe porque o médico pediu para sair do plantão conflitante e o pedido não foi aprovado
+ * - entrando: há pedido pendente que colocaria o médico em um plantão no mesmo horário
+ * novos = lista de [ini, fim] (ms) dos plantões que estão sendo alocados
+ */
+export const explicarConflitos = (db, medicoId, conflitos, novos) => {
+  const nome = (id) => db.medicos.find((m) => m.id === id)?.nome || '—'
+  const pend = (db.solicitacoes || []).filter((s) => s.status === 'pendente')
+  const esc = (id) => db.escalas.find((x) => x.id === id)
+  const motivoTxt = (s) => {
+    const e = esc(s.escalaId)
+    if (s.tipo === 'passagem')
+      return `a passagem de ${nome(s.medicoId)} (${descPlantao(e, s.turnoId, s.data)} · ${e?.nome}) para ${nome(s.destinoId)} ainda não foi aprovada`
+    return `a troca entre ${nome(s.medicoId)} (${descPlantao(e, s.turnoId, s.data)}) e ${nome(s.troca.medicoId)} (${descPlantao(e, s.troca.turnoId, s.troca.data)}) ainda não foi aprovada`
+  }
+
+  const porPendencia = []
+  const semPendencia = []
+  for (const c of conflitos) {
+    const s = pend.find(
+      (x) =>
+        x.escalaId === c.escalaId &&
+        ((x.medicoId === medicoId && x.turnoId === c.turnoId && x.vagaIdx === c.vagaIdx && x.data === c.data) ||
+          (x.tipo === 'troca' && x.troca?.medicoId === medicoId && x.troca.turnoId === c.turnoId && x.troca.vagaIdx === c.vagaIdx && x.troca.data === c.data)),
+    )
+    if (s) porPendencia.push({ ...c, sol: s, motivo: motivoTxt(s) })
+    else semPendencia.push(c)
+  }
+
+  const overlap = (iv) => iv && novos.some(([a, b]) => iv[0] < b && a < iv[1])
+  const entrando = []
+  for (const s of pend) {
+    const e = esc(s.escalaId)
+    if (s.tipo === 'passagem' && s.destinoId === medicoId && overlap(intervalo(e, s.turnoId, s.data))) entrando.push({ sol: s, motivo: motivoTxt(s) })
+    if (s.tipo === 'troca' && s.troca?.medicoId === medicoId && overlap(intervalo(e, s.turnoId, s.data))) entrando.push({ sol: s, motivo: motivoTxt(s) })
+    if (s.tipo === 'troca' && s.medicoId === medicoId && overlap(intervalo(e, s.troca.turnoId, s.troca.data))) entrando.push({ sol: s, motivo: motivoTxt(s) })
+  }
+  return { porPendencia, semPendencia, entrando }
+}

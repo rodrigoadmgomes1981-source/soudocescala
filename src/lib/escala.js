@@ -22,7 +22,8 @@ export const alocacaoDe = (escala, turnoId, vagaIdx, iso) => {
       a.turnoId === turnoId &&
       a.vagaIdx === vagaIdx &&
       a.desde <= iso &&
-      (!a.ate || iso <= a.ate),
+      (!a.ate || iso <= a.ate) &&
+      (!a.dias || a.dias.includes(weekday(iso))),
   )
 }
 
@@ -89,7 +90,15 @@ export const checarMedico = (db, medicoId, iso, turno, ignorarKey, limiteHoras =
         const iv = [i0, i0 + s.turno.duracao * 60]
         intervalos.push(iv)
         if (iv[0] < novo[1] && novo[0] < iv[1]) {
-          conflitos.push(`${esc.nome} · ${s.data.split('-').reverse().join('/')} ${s.turno.inicio}`)
+          conflitos.push({
+            escalaId: esc.id,
+            escalaNome: esc.nome,
+            turnoId: s.turno.id,
+            vagaIdx: s.vagaIdx,
+            data: s.data,
+            inicio: s.turno.inicio,
+            txt: `${esc.nome} · ${s.data.split('-').reverse().join('/')} ${s.turno.inicio}`,
+          })
         }
       }
     }

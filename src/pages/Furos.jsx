@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../lib/store'
-import { Badge, Empty, EscalaFiltro, Field } from '../components/ui'
+import { Badge, Empty, EscalaFiltro, JanelaTempo, resolverJanela } from '../components/ui'
 import { AlocarModal } from './EscalaDetalhe'
 import { DIAS, addDays, brl, fimTurno, fmtDate, fmtDateShort, inicioPlantao, logEscala, todayISO, weekday } from '../lib/utils'
 import { slotsGlobais } from '../lib/escala'
@@ -18,8 +18,9 @@ const CRIT = {
 export default function Furos({ go }) {
   const { db, update, notify } = useStore()
   const hoje = todayISO()
-  const [de, setDe] = useState(addDays(hoje, -7))
-  const [ate, setAte] = useState(addDays(hoje, 7))
+  const [janela, setJanela] = useState({ modo: 'custom', de: addDays(hoje, -7), ate: addDays(hoje, 7) })
+  const jan = resolverJanela(janela)
+  const { de, ate } = jan
   const [escalaIds, setEscalaIds] = useState([])
   const [simular, setSimular] = useState(true)
   const [sel, setSel] = useState(null)
@@ -27,7 +28,10 @@ export default function Furos({ go }) {
 
   const { itens, passados } = useMemo(() => {
     const todos = slotsGlobais(db, de, ate, (e) => e.status === 'publicada' && (escalaIds.length === 0 || escalaIds.includes(e.id))).filter(
-      (s) => s.data <= s.escala.publicadaAte,
+      (s) => {
+        const t = inicioPlantao(s.data, s.turno.inicio).getTime()
+        return s.data <= s.escala.publicadaAte && t >= jan.ini && t <= jan.fim
+      },
     )
     const out = []
     let passados = 0
@@ -49,7 +53,7 @@ export default function Furos({ go }) {
     }
     out.sort((a, b) => CRIT[a.tipo].ordem - CRIT[b.tipo].ordem || a.ini - b.ini)
     return { itens: out, passados }
-  }, [db, de, ate, escalaIds, simular, agora])
+  }, [db, de, ate, jan.ini, jan.fim, escalaIds, simular, agora])
 
   const ocorridos = itens.filter((i) => i.tipo === 'ocorrido' || i.tipo === 'ausencia')
   const criticos = itens.filter((i) => i.tipo === 'critico')
@@ -84,19 +88,18 @@ export default function Furos({ go }) {
           <h1>Furos de escala</h1>
           <p className="muted">Plantões que ficaram sem médico (ocorridos) e vagas ainda abertas com risco de virar furo.</p>
         </div>
-        <div className="filters">
-          <Field label="De">
-            <input id="fu-de" type="date" value={de} onChange={(e) => setDe(e.target.value)} />
-          </Field>
-          <Field label="Até">
-            <input id="fu-ate" type="date" value={ate} min={de} onChange={(e) => setAte(e.target.value)} />
-          </Field>
-        </div>
       </header>
 
-      <div className="card filtro-card">
-        <EscalaFiltro escalas={publicadas} value={escalaIds} onChange={setEscalaIds} label="Filtrar por escala" />
+      <div className="card filtro-card filter-bar">
+        <JanelaTempo value={janela} onChange={setJanela} />
+        <EscalaFiltro escalas={publicadas} value={escalaIds} onChange={setEscalaIds} label="Escalas" />
       </div>
+      {janela.modo !== 'custom' && (
+        <p className="muted small">
+          Cenário {jan.label.toLowerCase()}: mostra o risco de furo nos plantões que começam até {new Date(jan.fim).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}.
+          Para ver furos que já ocorreram, use Personalizado.
+        </p>
+      )}
 
       <div className="kpi-row">
         <div className="kpi danger">

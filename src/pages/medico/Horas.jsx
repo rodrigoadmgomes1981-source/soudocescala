@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../../lib/store'
+import { EscalaFiltro } from '../../components/ui'
 import { addDays, fmtDateShort, todayISO } from '../../lib/utils'
 import { plantoesDoMedico } from '../../lib/medico'
 
@@ -19,9 +20,16 @@ const mesAnt = (ym, n) => {
 export default function Horas() {
   const { db, user } = useStore()
   const [mes, setMes] = useState(todayISO().slice(0, 7))
+  const minhasEscalas = db.escalas.filter((e) => e.status === 'publicada' && e.alocacoes.some((a) => a.medicoId === user.medicoId))
+  const [escalaIds, setEscalaIds] = useState([])
+  const filtroEsc = (p) => escalaIds.length === 0 || escalaIds.includes(p.escala.id)
   const de = `${mes}-01`
   const ate = fimDoMes(mes)
-  const ps = useMemo(() => plantoesDoMedico(db, user.medicoId, de, ate), [db, user.medicoId, de, ate])
+  const ps = useMemo(
+    () => plantoesDoMedico(db, user.medicoId, de, ate).filter(filtroEsc),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [db, user.medicoId, de, ate, escalaIds],
+  )
 
   const plan = ps.reduce((t, p) => t + p.turno.duracao, 0)
   const exec = ps.reduce((t, p) => t + (p.horasExec || 0), 0)
@@ -75,6 +83,10 @@ export default function Horas() {
           </button>
         </div>
       </header>
+
+      <div className="card filtro-card">
+        <EscalaFiltro escalas={minhasEscalas} value={escalaIds} onChange={setEscalaIds} label="Escalas" />
+      </div>
 
       <div className="kpi-row">
         <div className="kpi">

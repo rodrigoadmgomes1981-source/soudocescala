@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useStore } from '../lib/store'
-import { Badge, Empty, Modal } from '../components/ui'
+import { Badge, Empty, EscalaFiltro, Modal } from '../components/ui'
 import { brl } from '../lib/utils'
 import { descPlantao } from '../lib/solicitacoes'
 
@@ -12,9 +12,12 @@ export default function Antecipacoes() {
   const [ver, setVer] = useState(null)
   const [recusar, setRecusar] = useState(null)
   const [motivo, setMotivo] = useState('')
-  const lista = [...(db.antecipacoes || [])].reverse().filter((a) => filtro === 'todas' || a.status === filtro)
+  const [escalaIds, setEscalaIds] = useState([])
+  const escalas = db.escalas.filter((e) => e.status === 'publicada')
+  const daEscala = (a) => escalaIds.length === 0 || a.itens.some((k) => escalaIds.includes(k.split('|')[0]))
+  const lista = [...(db.antecipacoes || [])].reverse().filter((a) => (filtro === 'todas' || a.status === filtro) && daEscala(a))
   const nome = (id) => db.medicos.find((m) => m.id === id)?.nome
-  const pend = (db.antecipacoes || []).filter((a) => a.status === 'pendente')
+  const pend = (db.antecipacoes || []).filter((a) => a.status === 'pendente' && daEscala(a))
 
   const decidir = (a, status, mot) => {
     update((d) => {
@@ -44,6 +47,10 @@ export default function Antecipacoes() {
           <p className="muted">Pedidos dos médicos para receber antes do ciclo normal plantões já apurados.</p>
         </div>
       </header>
+
+      <div className="card filtro-card">
+        <EscalaFiltro escalas={escalas} value={escalaIds} onChange={setEscalaIds} label="Escalas" />
+      </div>
 
       <div className="kpi-row">
         <div className="kpi warn">
